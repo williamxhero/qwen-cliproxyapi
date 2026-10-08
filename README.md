@@ -105,7 +105,41 @@ Token Plan `/models` is auth-protected. Coding Plan `/models` is a static public
 .\bin\bailian-quota.exe --source cookie --cookie-file C:\private\bailian-cookie.txt
 ```
 
-Flags: `--json` (default normalized JSON), `--pretty`, `--timeout 90s`, `--check` (login/reachability only), `--source bsk|cookie`, `--browser <id>`, `--cookie <header>`, `--cookie-file <path>`, `--verbose`.
+Flags: `--json` (default normalized JSON), `--pretty`, `--timeout 90s`, `--check` (login/reachability only), `--source bsk|cookie`, `--browser <id>`, `--cookie <header>`, `--cookie-file <path>`, `--cache-file <path>`, `--cache-only`, `--max-age 45m`, `--verbose`.
+
+### Serving a service-identity host (session 0)
+
+A CLIProxyAPI core that runs as a Windows service cannot reach the browser daemon in the
+interactive session. Run two halves:
+
+1. **Interactive session** — a scheduled task refreshes the reading into a cache file
+   (this is also what keeps the console login fresh):
+
+       schtasks /create /f /tn QwenQuotaRefresh /sc minute /mo 10 /it ^
+         /tr "C:\ProgramData\cpa-qwen-quota\refresh-qwen-quota.cmd"
+       :: refresh-qwen-quota.cmd
+       "D:\...\qwen-cliproxyapi\bin\bailian-quota.exe" --json --timeout 120s --cache-file "C:\ProgramData\cpa-qwen-quota\qwen-quota.json"
+
+   Use a directory the service account can read (e.g. `C:\ProgramData\...`); a path under
+   `C:\Users\<user>\...` is not readable by `NT AUTHORITY\LocalService`.
+
+2. **Service identity** — point the plugin at the cache:
+
+       quota-source: command
+       command: "D:\\...\\bin\\bailian-quota.exe"
+       command-args: ["--json", "--cache-only", "--cache-file", "C:/ProgramData/cpa-qwen-quota/qwen-quota.json", "--max-age", "45m"]
+
+`--cache-only` never touches the network: it prints the cached reading and exits non-zero
+(`cache_unavailable`, `cache_invalid`, `cache_stale`) when no fresh reading exists, so a
+stalled refresh surfaces as an explicit error instead of silently stale numbers.
+
+### Provider keys must not collide
+
+A model id routes by its provider prefix. An `openai-compatibility` group literally named
+`Qwen` normalises to the provider key `qwen` — the same key this plugin registers — and the
+host then routes `qwen/<model>` to its own compatibility executor, which fails with
+`missing provider baseURL`. Name that group something else (e.g. `Qwen-Compat`) when this
+plugin is installed.
 
 Browser mode selects the first connected browser unless `--browser` is supplied, starts a session **with `--no-focus`**, navigates the Bailian console, then runs an asynchronous console RPC evaluation. It never extracts, prints or saves browser cookies/tokens. The session is stopped even on failure. Avoid running it concurrently with another browser driver. Requests remain on Alibaba console origins.
 
