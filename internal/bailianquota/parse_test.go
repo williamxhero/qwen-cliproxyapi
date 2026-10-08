@@ -47,7 +47,7 @@ func TestRealUsageFixtureAndFrozenContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	var object map[string]json.RawMessage
-	if json.Unmarshal(raw, &object) != nil || len(object) != 7 {
+	if json.Unmarshal(raw, &object) != nil || len(object) != 10 {
 		t.Fatal(string(raw))
 	}
 	for _, key := range []string{"source", "plan", "planStatus", "observedAt", "windows", "metrics", "notes"} {
@@ -64,6 +64,127 @@ func TestRealUsageFixtureAndFrozenContract(t *testing.T) {
 	_ = json.Unmarshal(windowRaw, &window)
 	if len(window) != 3 {
 		t.Fatal(window)
+	}
+}
+
+func TestSubscriptionPeriodFields(t *testing.T) {
+	start := time.Date(2026, 9, 17, 18, 11, 24, 0, chinaTime)
+	end := observed.Add(25 * time.Hour)
+	for _, wrapper := range []string{"", "instanceInfo", "planInfo", "subscription", "instance", "queryInstanceInfoResponse", "instanceInfoList"} {
+		t.Run(wrapper, func(t *testing.T) {
+			data := map[string]any{"planName": "Actual Plan", "startTime": start.UnixMilli(), "endTime": end.UnixMilli()}
+			var subscription any = data
+			if wrapper == "instanceInfoList" {
+				subscription = map[string]any{wrapper: []any{data}}
+			} else if wrapper != "" {
+				subscription = map[string]any{wrapper: data}
+			}
+			raw, _ := json.Marshal(subscription)
+			input := responses()
+			input["subscription"] = fixture(string(raw))
+			result, err := ParseResponses("bsk", input, observed, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := json.Marshal(result)
+			var object map[string]any
+			_ = json.Unmarshal(body, &object)
+			if object["planStart"] != start.Format(time.RFC3339) || object["planEnd"] != end.In(chinaTime).Format(time.RFC3339) || object["daysLeft"] != float64(2) {
+				t.Fatalf("period missing or incorrect: %s", body)
+			}
+		})
+	}
+}
+
+func TestSubscriptionPeriodAbsentAndInvalidOmitted(t *testing.T) {
+	for _, value := range []string{"", `null`, `"not-a-date"`, `"1792252800000"`, `false`, `0`, `-1`, `1792252800`, `1.5`, `1e30`, `253402300800000`} {
+		t.Run(value, func(t *testing.T) {
+			data := `{}`
+			if value != "" {
+				data = `{"planName":"Actual Plan","startTime":` + value + `,"endTime":` + value + `}`
+			}
+			input := responses()
+			input["subscription"] = fixture(data)
+			result, err := ParseResponses("bsk", input, observed, false)
+			if err != nil || len(result.Windows) != 1 {
+				t.Fatalf("optional invalid period affected usage: %+v %v", result, err)
+			}
+			body, _ := json.Marshal(result)
+			var object map[string]json.RawMessage
+			_ = json.Unmarshal(body, &object)
+			for _, field := range []string{"planStart", "planEnd", "daysLeft"} {
+				if _, present := object[field]; present {
+					t.Fatalf("invented %s: %s", field, body)
+				}
+			}
+		})
+	}
+}
+
+func TestSubscriptionPeriodIndependentFieldsAndMilliseconds(t *testing.T) {
+	for _, tc := range []struct {
+		name, data, start, end string
+		wantDays               *int
+	}{
+		{"start_only", `{"startTime":1789639884000}`, "2026-09-17T18:11:24+08:00", "", nil},
+		{"invalid_end", `{"startTime":1789639884000,"endTime":"invalid"}`, "2026-09-17T18:11:24+08:00", "", nil},
+		{"ambiguous_instances", `{"instanceInfoList":[{"startTime":1789639884000},{"startTime":1789639884000}]}`, "", "", nil},
+		{"unrelated_timestamp", `{"unrelated":{"startTime":1789639884000}}`, "", "", nil},
+		{"year_overflow", `{"startTime":253402300799999}`, "", "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := responses()
+			input["subscription"] = fixture(tc.data)
+			got, err := ParseResponses("bsk", input, observed, false)
+			if err != nil || got.PlanStart != tc.start || got.PlanEnd != tc.end || got.DaysLeft != tc.wantDays {
+				t.Fatalf("%+v %v", got, err)
+			}
+		})
+	}
+	end := observed.Add(24*time.Hour + time.Millisecond)
+	data, _ := json.Marshal(map[string]any{"endTime": end.UnixMilli()})
+	input := responses()
+	input["subscription"] = fixture(string(data))
+	result, err := ParseResponses("bsk", input, observed, false)
+	if err != nil || result.PlanEnd != end.In(chinaTime).Format(time.RFC3339Nano) || result.DaysLeft == nil || *result.DaysLeft != 2 {
+		t.Fatalf("millisecond period was truncated: %+v %v", result, err)
+	}
+}
+
+func TestSubscriptionDaysLeftCeiling(t *testing.T) {
+	end := time.Date(2027, 9, 18, 0, 0, 0, 0, chinaTime)
+	for _, tc := range []struct {
+		name string
+		now  time.Time
+		want int
+	}{
+		{"exact_day", end.Add(-24 * time.Hour), 1},
+		{"partial_day", end.Add(-time.Hour), 1},
+		{"just_over_day", end.Add(-24*time.Hour - time.Nanosecond), 2},
+		{"just_under_day", end.Add(-24*time.Hour + time.Nanosecond), 1},
+		{"expires_now", end, 0},
+		{"expired_partial_day", end.Add(time.Hour), 0},
+		{"expired_over_day", end.Add(25 * time.Hour), -1},
+		{"far_future", time.Date(2026, 10, 8, 0, 0, 0, 0, chinaTime), 345},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data, _ := json.Marshal(map[string]any{"endTime": end.UnixMilli()})
+			input := responses()
+			input["subscription"] = fixture(string(data))
+			result, err := ParseResponses("bsk", input, tc.now, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := json.Marshal(result)
+			var object map[string]any
+			_ = json.Unmarshal(body, &object)
+			if object["daysLeft"] != float64(tc.want) || object["planEnd"] != end.Format(time.RFC3339) {
+				t.Fatalf("want daysLeft %d, got %s", tc.want, body)
+			}
+			if _, present := object["planStart"]; present {
+				t.Fatalf("invented missing planStart: %s", body)
+			}
+		})
 	}
 }
 

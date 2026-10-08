@@ -28,6 +28,10 @@ func TestQuotaCommandHelper(t *testing.T) {
 	switch mode {
 	case "success":
 		fmt.Print(quotaFixture)
+	case "period":
+		fmt.Print(strings.Replace(quotaFixture, `"planStatus":"生效中"`, `"planStatus":"生效中","planStart":"2026-09-17T18:11:24+08:00","planEnd":"2027-09-18T00:00:00+08:00","daysLeft":999`, 1))
+	case "metrics-only":
+		fmt.Print(`{"metrics":[{"key":"balance","label":"余额","value":0,"format":"number"}]}`)
 	case "failure":
 		fmt.Print(`{"error":"ConsoleNeedLogin","message":"CLI says login required"}`)
 		os.Exit(3)

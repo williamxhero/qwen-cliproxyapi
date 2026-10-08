@@ -20,6 +20,9 @@ type Result struct {
 	Source     string   `json:"source"`
 	Plan       string   `json:"plan"`
 	PlanStatus string   `json:"planStatus"`
+	PlanStart  string   `json:"planStart,omitempty"`
+	PlanEnd    string   `json:"planEnd,omitempty"`
+	DaysLeft   *int     `json:"daysLeft,omitempty"`
 	ObservedAt string   `json:"observedAt"`
 	Windows    []Window `json:"windows"`
 	Metrics    []Metric `json:"metrics"`

@@ -90,7 +90,7 @@ func TestAuthDispatchMethods(t *testing.T) {
 	if !got.Handled || got.Auth.Attributes["api_key"] != "sk-dispatch-1" {
 		t.Fatalf("parse dispatch = %#v", got)
 	}
-	for _, method := range []string{pluginabi.MethodAuthLoginStart, pluginabi.MethodAuthLoginPoll} {
+	for _, method := range []string{pluginabi.MethodAuthLoginPoll} {
 		raw, _ = m.HandleCall(method, []byte(`{}`))
 		if env := decodeEnv(t, raw); env.OK || env.Error == nil || env.Error.Code != "unsupported" {
 			t.Fatalf("%s = %#v", method, env.Error)

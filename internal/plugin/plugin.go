@@ -110,8 +110,11 @@ func (m *Manager) HandleCall(method string, request []byte) (resp []byte, err er
 		if json.Unmarshal(request, &req) != nil {
 			return ErrEnvelope("invalid_request", "malformed auth login request body"), nil
 		}
-		_, err := (authProvider{}).StartLogin(context.Background(), req.AuthLoginStartRequest)
-		return ErrEnvelope("unsupported", err.Error()), nil
+		resp, err := (authProvider{}).StartLogin(context.Background(), req.AuthLoginStartRequest)
+		if err != nil {
+			return ErrEnvelope("auth_failure", err.Error()), nil
+		}
+		return okEnvelope(resp), nil
 	case pluginabi.MethodAuthLoginPoll:
 		var req struct{ pluginapi.AuthLoginPollRequest }
 		if json.Unmarshal(request, &req) != nil {
@@ -219,7 +222,8 @@ func registrationEnvelope() []byte {
 	return okEnvelope(registrationResult{
 		SchemaVersion: pluginabi.SchemaVersion,
 		Metadata: pluginapi.Metadata{
-			Name:             pluginName,
+			Name:             "QWen Plan API Key",
+			Logo:             "/v0/resource/plugins/" + pluginName + "/logo.svg",
 			Version:          pluginVersion,
 			Author:           pluginName,
 			GitHubRepository: githubRepoURL,

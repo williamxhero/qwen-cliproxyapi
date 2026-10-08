@@ -35,6 +35,9 @@ func ParseResponses(source string, responses map[string]json.RawMessage, observe
 				result.Plan = "Token Plan 个人版 Standard"
 			}
 		}
+		result.PlanStart = findSubscriptionTime(subscription, "startTime")
+		result.PlanEnd = findSubscriptionTime(subscription, "endTime")
+		result.updateDaysLeft(observed)
 		result.PlanStatus = findText(subscription, []string{"planStatus", "instanceStatusName", "statusName", "instanceStatus", "status"})
 		if result.PlanStatus == "VALID" {
 			result.PlanStatus = "生效中"
@@ -184,6 +187,54 @@ func hasLoginError(value any) bool {
 		return strings.Contains(text, "consoleneedlogin") || strings.Contains(text, "notlogin") || strings.Contains(text, "needlogin") || strings.Contains(text, "nologin") || strings.Contains(text, "未登录") || strings.Contains(text, "请先登录")
 	}
 	return false
+}
+
+// Only known subscription wrappers are searched; unrelated timestamps and
+// ambiguous multi-instance lists must not supply this plan's period.
+func findSubscriptionTime(data map[string]any, field string) string {
+	if raw, ok := data[field].(json.Number); ok {
+		millis, err := strconv.ParseInt(string(raw), 10, 64)
+		if err == nil && millis >= 946684800000 && millis <= 253402300799999 {
+			value := time.UnixMilli(millis).In(chinaTime)
+			if value.Year() <= 9999 {
+				return value.Format(time.RFC3339Nano)
+			}
+		}
+	}
+	for _, wrapper := range []string{"instanceInfo", "planInfo", "subscription", "instance", "queryInstanceInfoResponse", "instanceInfoList"} {
+		switch nested := data[wrapper].(type) {
+		case map[string]any:
+			if value := findSubscriptionTime(nested, field); value != "" {
+				return value
+			}
+		case []any:
+			if len(nested) == 1 {
+				if object, ok := nested[0].(map[string]any); ok {
+					if value := findSubscriptionTime(object, field); value != "" {
+						return value
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func (result *Result) updateDaysLeft(now time.Time) {
+	result.DaysLeft = nil
+	end, err := time.Parse(time.RFC3339, result.PlanEnd)
+	if err != nil {
+		return
+	}
+	// Integer ceiling preserves sub-second day boundaries and avoids the
+	// 292-year saturation of time.Sub for otherwise valid millisecond epochs.
+	seconds := end.Unix() - now.Unix()
+	days := seconds / 86400
+	if seconds%86400*int64(time.Second)+int64(end.Nanosecond()-now.Nanosecond()) > 0 {
+		days++
+	}
+	value := int(days)
+	result.DaysLeft = &value
 }
 
 func scalarText(value any) string {

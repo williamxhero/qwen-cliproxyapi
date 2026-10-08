@@ -17,6 +17,7 @@ Expose one provider, **`qwen`**, using CLIProxyAPI's credential scheduler, rotat
 - OpenAI Chat Completions and Anthropic Messages requests, tool calls, image parts and streaming SSE translation, adapted from the MIT reference.
 - Authenticated catalog discovery, optional `qwen/` prefix, last-good snapshot and built-in initial fallback.
 - Native quota groups, windows, subscription and metrics from an external CLI; no shell invocation, hard timeout, no invented readings.
+- Plugin-registered **Qwen 额度** management page: 套餐/status/expiry/remaining days, per-window progress and reset countdowns, CLI observation time, and per-credential/all refresh buttons. Embedded HTML requires no runtime resource files.
 - Standalone stdlib-only Go CLI: already-logged-in browser via `bsk`, or explicitly supplied cookie for service/session-0 environments.
 
 ## Requirements
@@ -42,9 +43,11 @@ Set the key in the **host process environment** rather than storing it in this r
 
 ```yaml
 plugins:
+  enabled: true
   dir: "D:\\WILL\\AGENT\\CPA\\qwen-cliproxyapi\\plugins"
   configs:
     qwen-cliproxyapi:
+      enabled: true
       base-url: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
       api-keys:
         - value: "${QWEN_API_KEY}"
@@ -85,6 +88,18 @@ plugins:
 Without an explicit key name labels are `Qwen 1`, `Qwen 2`, etc. IDs depend on the key hash, not label or ordering. Removed configuration keys are not automatically deleted from the host auth directory: the ABI has no deletion callback. Manage stale credentials explicitly in the host.
 
 For Coding Plan use `https://coding.dashscope.aliyuncs.com/v1` (CN) or `https://coding-intl.dashscope.aliyuncs.com/v1` (international). Coding Plan keys typically start with `sk-sp-`. All execution goes to `{base-url}/chat/completions`; no fallback to another provider or credential is performed by the plugin.
+
+## Panel API-key form
+
+Registration displays **QWen Plan API Key** with an original embedded Q monogram at `/v0/resource/plugins/qwen-cliproxyapi/logo.svg`. The existing **Qwen 额度** menu is unchanged; panel-created credentials are included in that page.
+
+With management authorization, submit `POST /v0/management/plugins/qwen-cliproxyapi/credentials` with `base_url`, `api_key`, and optional `name`. The default label is `Qwen`. Unknown fields are ignored. URLs must be HTTP/HTTPS with a hostname and without userinfo, query, or fragment; explicit HTTP panel credentials are accepted independently of the config-only `allow-http` switch. Prefer HTTPS outside local tests. Empty/whitespace keys and control characters are rejected. Successful responses contain only `ok`, the `qwen-key-<sha256>` ID, and the label; keys are never returned or logged. A label containing the submitted key is redacted. Duplicate key + normalized base URL returns 409, including configured and imported credentials. Unreadable existing Qwen storage fails closed with 502.
+
+The host saves the same top-level `type`, `id`, `label`, and `api_key` schema as configured credentials, plus `base_url`. Panel IDs hash the key and URL together, so the same key can target distinct URLs without overwriting a credential. Existing configured-key IDs remain unchanged. Panel parsing uses the host's filename-based runtime ID (`<returned id>.json`) so watcher parsing updates the initially saved record instead of creating a duplicate runtime credential. Execution resolves `base_url` from the selected credential's attributes, then persisted storage, then the plugin config; both streaming and non-streaming use that result. Parsing/reloading and refresh preserve the URL and panel label. Model discovery still uses the configured key/base URL, not a separate catalogue per panel credential; at least one configured key remains required.
+
+`auth.login.start` returns the manual form specification in `Metadata` (`auth_kind: manual_api_key`, the credential submit path, **添加凭证**, and Base URL/API Key/凭证名称 fields). An opaque state satisfies the host's login-start validation; it is not an OAuth flow, and the form does not need polling. Empirical isolated-core verification at 8399 returned HTTP 200 with only `state`, `status: "ok"`, and `url: ""`: **the host does not forward Metadata**. The panel must use its allowlist fallback; the metadata form path is not functional through this host's management response.
+
+**Persistence limitation:** the v8 `host.auth.save` implementation writes directly to the destination before runtime registration, without a transactional rollback/delete callback. The plugin serializes its own duplicate checks/submissions, creates no local credential state before save confirmation, and returns a safe 502 on host rejection. It cannot guarantee that a failing host write leaves no partial file, or that a timed-out callback cannot later complete. Full failure atomicity requires a host-side transactional save; do not interpret a 502 as proof that no credential exists. No host source or live deployment is modified here.
 
 ## Model catalogue
 
@@ -156,6 +171,24 @@ The CLI exits 0 only with a genuine reading (or a successful `--check`). Failure
 The plugin maps windows to `QuotaBucket` (`remainingFraction = 1 - usedPercent/100`, clamped), preserves reset timestamps, maps metrics to `Summary` and plan to `Subscription.Plan`. No windows and no metrics is an error; subprocess failure, timeout or invalid JSON does not fabricate a balance.
 
 Use `GET /v0/management/quota/providers` to discover support, then `POST /v0/management/quota/fetch` with `{"auth_index":"<credential index>"}` and management authorization. Console quota is **account-scoped**, not derivable from a plan API key: configure a console login corresponding to the credential's account. Multiple keys sharing one CLI login will display that login's account readings.
+
+### Qwen 额度 management page
+
+The panel's generic credential quota card only recognizes a built-in provider list. Open **Qwen 额度** from the panel's plugin/resource menu instead. The plugin registers `/quota`, served as `GET /v0/resource/plugins/qwen-cliproxyapi/quota`; its self-contained page posts to the same-origin `/v0/management/plugins/qwen-cliproxyapi/quota-usage`. The existing `/quota-info` endpoint and native quota API remain available.
+
+Sign into the management panel with **Remember password** enabled, as required by the MIT reference page. The embedded page decodes the host's `cli-proxy-auth` local storage (including `enc::v1::`) at request time and supplies management authorization; it never embeds a management key or sends requests to a third-party origin. If credentials cannot be accessed or the host rejects authorization, it displays the error rather than fake quota.
+
+`quota-usage` returns `{"cards":[...]}`. An empty body or `{}` refreshes all configured Qwen credentials; `{"auth_index":"<host credential index>"}` refreshes one. Indexes come from the host credential list, not the API-key hash; unknown indexes return 404. A CLI failure remains a card with `error` containing the CLI diagnostic and no fabricated reading. The page displays **读不到额度：<错误>** and clears old reading values on failed refresh.
+
+Optional `planStart`, `planEnd` and `daysLeft` extend the existing CLI contract. Subscription timestamps come only from console-reported millisecond epochs; `daysLeft = ceil((planEnd - now) / 24h)`. Missing/invalid periods stay omitted and display **未提供**. Window `resetsInDays` follows the same ceiling rule; expired periods can be zero or negative. Neither countdown implies unused quota.
+
+For a service that cannot reach the interactive browser, refresh a protected cache periodically from the user session:
+
+```powershell
+.\bin\bailian-quota.exe --json --timeout 120s --cache-file C:\ProgramData\cpa-qwen-quota\qwen-quota.json
+```
+
+Then set `command-args: ["--json", "--cache-only", "--cache-file", "C:/ProgramData/cpa-qwen-quota/qwen-quota.json", "--max-age", "45m"]`. Cache-only never starts a browser and fails honestly for missing, invalid or stale readings. Refresh buttons rerun the configured CLI; in cache-only mode they reload the last observation, **not** the console. The page always shows the CLI's `observedAt`. Old caches without a subscription period remain readable but cannot reveal remaining plan days until a successful console refresh by the rebuilt CLI.
 
 ## Testing
 

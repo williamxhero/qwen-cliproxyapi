@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
+
+	"qwen-cliproxyapi/internal/config"
 )
 
 const maxQuotaStdout = 1 << 20
@@ -61,35 +63,13 @@ func (m *Manager) FetchQuota(ctx context.Context, req pluginapi.QuotaFetchReques
 	m.mu.RLock()
 	cfg := m.cfg
 	m.mu.RUnlock()
-	if cfg.QuotaSource != "command" || cfg.Command == "" || cfg.CommandTimeout <= 0 {
-		return empty, fmt.Errorf("quota command is not configured")
-	}
-	ctx, cancel := context.WithTimeout(ctx, cfg.CommandTimeout)
-	defer cancel()
-	stdout := &boundedOutput{limit: maxQuotaStdout, cancel: cancel}
-	stderr := &boundedOutput{limit: maxQuotaStderr, cancel: cancel}
-	cmd := exec.CommandContext(ctx, cfg.Command, cfg.CommandArgs...)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	cmd.WaitDelay = 100 * time.Millisecond
-	runErr := cmd.Run()
-	out, outOverflow := stdout.snapshot()
-	errOut, errOverflow := stderr.snapshot()
-	safeError := func(message string) (pluginapi.QuotaFetchResponse, error) {
-		return empty, fmt.Errorf("%s", boundedDiagnostic([]byte(redactSecrets(message, cfg, key))))
-	}
-	if outOverflow || errOverflow {
-		return safeError("quota command output exceeds byte limit")
-	}
-	if ctx.Err() != nil {
-		return safeError("quota command timed out or was canceled")
-	}
-	if runErr != nil {
-		return safeError(commandErrorText(out, errOut, "quota command failed"))
-	}
-	result, err := normalizeQuota(out, cfg.DisplayName)
+	raw, err := fetchCommandQuota(ctx, cfg, key)
 	if err != nil {
-		return safeError(commandErrorText(out, errOut, err.Error()))
+		return empty, err
+	}
+	result, err := normalizeCommandQuota(raw, cfg.DisplayName)
+	if err != nil {
+		return empty, err
 	}
 	if result.Subscription != nil {
 		result.Subscription.Plan = redactSecrets(result.Subscription.Plan, cfg, key)
@@ -108,6 +88,46 @@ func (m *Manager) FetchQuota(ctx context.Context, req pluginapi.QuotaFetchReques
 		metric.Currency = redactSecrets(metric.Currency, cfg, key)
 	}
 	return result, nil
+}
+
+// The native quota API and embedded page share command execution, validation and
+// error handling, so the page cannot manufacture a reading rejected by the API.
+func fetchCommandQuota(ctx context.Context, cfg config.Config, key string) (commandQuota, error) {
+	empty := commandQuota{}
+	if cfg.QuotaSource != "command" || cfg.Command == "" || cfg.CommandTimeout <= 0 {
+		return empty, fmt.Errorf("quota command is not configured")
+	}
+	ctx, cancel := context.WithTimeout(ctx, cfg.CommandTimeout)
+	defer cancel()
+	stdout := &boundedOutput{limit: maxQuotaStdout, cancel: cancel}
+	stderr := &boundedOutput{limit: maxQuotaStderr, cancel: cancel}
+	cmd := exec.CommandContext(ctx, cfg.Command, cfg.CommandArgs...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.WaitDelay = 100 * time.Millisecond
+	runErr := cmd.Run()
+	out, outOverflow := stdout.snapshot()
+	errOut, errOverflow := stderr.snapshot()
+	safeError := func(message string) (commandQuota, error) {
+		return empty, fmt.Errorf("%s", boundedDiagnostic([]byte(redactSecrets(message, cfg, key))))
+	}
+	if outOverflow || errOverflow {
+		return safeError("quota command output exceeds byte limit")
+	}
+	if ctx.Err() != nil {
+		return safeError("quota command timed out or was canceled")
+	}
+	if runErr != nil {
+		return safeError(commandErrorText(out, errOut, "quota command failed"))
+	}
+	var raw commandQuota
+	if json.Unmarshal(out, &raw) != nil {
+		return safeError(commandErrorText(out, errOut, "quota command stdout is not valid contract JSON"))
+	}
+	if _, err := normalizeCommandQuota(raw, cfg.DisplayName); err != nil {
+		return safeError(commandErrorText(out, errOut, err.Error()))
+	}
+	return raw, nil
 }
 
 // Preserve the CLI's own structured errors on both zero and nonzero exits.
@@ -152,6 +172,9 @@ type commandQuota struct {
 	Source     string `json:"source"`
 	Plan       string `json:"plan"`
 	PlanStatus string `json:"planStatus"`
+	PlanStart  string `json:"planStart"`
+	PlanEnd    string `json:"planEnd"`
+	DaysLeft   *int   `json:"daysLeft"`
 	ObservedAt string `json:"observedAt"`
 	Windows    []struct {
 		Window      string   `json:"window"`
@@ -177,6 +200,11 @@ func normalizeQuota(body []byte, displayName string) (pluginapi.QuotaFetchRespon
 	if json.Unmarshal(body, &raw) != nil {
 		return empty, fmt.Errorf("quota command stdout is not valid contract JSON")
 	}
+	return normalizeCommandQuota(raw, displayName)
+}
+
+func normalizeCommandQuota(raw commandQuota, displayName string) (pluginapi.QuotaFetchResponse, error) {
+	empty := pluginapi.QuotaFetchResponse{}
 	if raw.Error != "" || raw.Message != "" {
 		return empty, fmt.Errorf("quota command returned an error")
 	}
