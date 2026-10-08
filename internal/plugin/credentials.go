@@ -102,12 +102,15 @@ func (m *Manager) credentialExists(ctx context.Context, cfg config.Config, key, 
 		if entry.Provider != ProviderID && entry.Type != ProviderID {
 			continue
 		}
-		// The list intentionally excludes keys. Read only host-reported plugin auth
-		// files, as materializeAuthRecords already does for startup disk entries.
-		if !filepath.IsAbs(entry.Path) {
-			return false, fmt.Errorf("credential path unavailable")
+		// The host reports plugin-managed records with a path relative to its own working
+		// directory; resolve it before reading so duplicate detection stays reliable.
+		path := strings.TrimSpace(entry.Path)
+		if path != "" && !filepath.IsAbs(path) {
+			if abs, err := filepath.Abs(path); err == nil {
+				path = abs
+			}
 		}
-		raw, err := os.ReadFile(entry.Path)
+		raw, err := os.ReadFile(path)
 		if err != nil {
 			return false, fmt.Errorf("credential read failed")
 		}

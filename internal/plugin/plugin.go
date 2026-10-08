@@ -325,21 +325,24 @@ func (m *Manager) materializeAuthRecords(ctx context.Context, cfg config.Config)
 		// Recover identity from those host-reported paths to avoid duplicates
 		// when a credential has a readable filename.
 		if (entry.Provider == ProviderID || entry.Type == ProviderID) && !strings.HasPrefix(entry.ID, "qwen-key-") {
-			if !filepath.IsAbs(entry.Path) {
-				return fmt.Errorf("existing auth record has no absolute path")
+			// Records the host reports as plugin-managed may carry a path relative to its
+			// own working directory. Resolve it, and never abort registration because one
+			// record cannot be read: identity is still recoverable from the reported name.
+			path := strings.TrimSpace(entry.Path)
+			if path != "" && !filepath.IsAbs(path) {
+				if abs, err := filepath.Abs(path); err == nil {
+					path = abs
+				}
 			}
-			raw, err := os.ReadFile(entry.Path)
-			if err != nil {
-				return fmt.Errorf("cannot read existing plugin auth record")
+			if raw, err := os.ReadFile(path); err == nil {
+				var record struct {
+					APIKey string `json:"api_key"`
+				}
+				if json.Unmarshal(raw, &record) == nil && record.APIKey != "" {
+					digest := sha256.Sum256([]byte(record.APIKey))
+					existing["qwen-key-"+hex.EncodeToString(digest[:])] = struct{}{}
+				}
 			}
-			var record struct {
-				APIKey string `json:"api_key"`
-			}
-			if json.Unmarshal(raw, &record) != nil || record.APIKey == "" {
-				return fmt.Errorf("existing plugin auth record is invalid")
-			}
-			digest := sha256.Sum256([]byte(record.APIKey))
-			existing["qwen-key-"+hex.EncodeToString(digest[:])] = struct{}{}
 		}
 		if name := strings.TrimSpace(entry.Name); name != "" {
 			existing[name] = struct{}{}
