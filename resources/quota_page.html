@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qwen 额度</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg-primary: #f0eee8;
+  --bg-secondary: #faf9f5;
+  --bg-tertiary: #e9e6df;
+  --text-primary: #2d2a26;
+  --text-secondary: #6d6760;
+  --border-color: #e3e1db;
+  --meter-fill: #2a78d6;
+  --meter-track: #cde2fb;
+  --error-color: #b3261e;
+  --shadow: 0 1px 3px rgba(45, 42, 38, .08);
+}
+[data-theme="white"] { color-scheme: light; }
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-primary: #1d1b18;
+  --bg-secondary: #151412;
+  --bg-tertiary: #262320;
+  --text-primary: #f0eee8;
+  --text-secondary: #b8b1a8;
+  --border-color: #3c3833;
+  --meter-fill: #3987e5;
+  --meter-track: #0d366b;
+  --error-color: #ffb4ab;
+  --shadow: 0 1px 3px rgba(0, 0, 0, .25);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="white"]):not([data-theme="dark"]) {
+    color-scheme: dark;
+    --bg-primary: #1d1b18;
+    --bg-secondary: #151412;
+    --bg-tertiary: #262320;
+    --text-primary: #f0eee8;
+    --text-secondary: #b8b1a8;
+    --border-color: #3c3833;
+    --meter-fill: #3987e5;
+    --meter-track: #0d366b;
+    --error-color: #ffb4ab;
+    --shadow: 0 1px 3px rgba(0, 0, 0, .25);
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 32px; background: var(--bg-secondary); color: var(--text-primary); font: 14px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif; }
+.page { max-width: 1160px; margin: 0 auto; }
+.page-header, .card-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.page-header { flex-wrap: wrap; margin-bottom: 20px; }
+h1 { margin: 0; font-size: 28px; line-height: 1.3; }
+h2 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+h3 { margin: 0 0 12px; font-size: 14px; }
+p { margin: 0; }
+.description, .muted, dt { color: var(--text-secondary); }
+.description { margin-top: 6px; }
+button { min-height: 40px; flex-shrink: 0; padding: 8px 14px; border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); background: var(--bg-tertiary); font: inherit; font-weight: 600; cursor: pointer; }
+button:hover:not(:disabled) { background: var(--bg-secondary); border-color: var(--text-secondary); }
+button:disabled { cursor: not-allowed; opacity: .6; }
+:focus-visible { outline: 2px solid var(--meter-fill); outline-offset: 4px; }
+.page-message { margin-bottom: 16px; min-height: 24px; overflow-wrap: anywhere; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 20px; }
+.card { min-width: 0; padding: 24px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-primary); box-shadow: var(--shadow); overflow-wrap: anywhere; }
+.card-header { margin-bottom: 18px; align-items: flex-start; }
+.card-body { transition: opacity .15s; }
+.card[aria-busy="true"] .card-body { opacity: .55; }
+.section { border-top: 1px solid var(--border-color); padding-top: 18px; margin-top: 18px; }
+.plan { font-size: 20px; font-weight: 600; line-height: 1.5; }
+.plan-status { display: inline-block; padding: 2px 8px; margin-top: 8px; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-secondary); }
+dl { margin: 14px 0 0; }
+.detail { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 12px; margin-top: 8px; }
+dd { margin: 0; }
+.days { font-size: 24px; font-weight: 600; line-height: 1.2; }
+.window + .window { margin-top: 22px; }
+.window-header, .percentages { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.window-name { font-weight: 600; }
+.percentages { margin-top: 6px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.meter-wrap { position: relative; display: flex; align-items: center; min-height: 28px; margin-top: 4px; }
+.track { width: 100%; height: 8px; border-radius: 4px; background: var(--meter-track); overflow: hidden; }
+.fill { height: 100%; border-radius: 0 4px 4px 0; background: var(--meter-fill); }
+.meter-wrap:hover .fill, .meter-wrap:focus-visible .fill { filter: brightness(1.15); }
+.tooltip { display: none; position: absolute; left: 0; bottom: calc(100% + 4px); z-index: 1; max-width: 100%; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); background: var(--bg-secondary); box-shadow: var(--shadow); font-size: 12px; pointer-events: none; }
+.meter-wrap:hover .tooltip, .meter-wrap:focus-visible .tooltip { display: block; }
+.window-meta { font-size: 12px; color: var(--text-secondary); }
+.window-meta p + p { margin-top: 3px; }
+.metrics { width: 100%; border-collapse: collapse; }
+.metrics th, .metrics td { padding: 8px 0; border-bottom: 1px solid var(--border-color); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.metrics th { color: var(--text-secondary); font-weight: 500; }
+.metrics td { text-align: right; padding-left: 14px; font-variant-numeric: tabular-nums; }
+.observed { margin-top: 18px; font-size: 12px; color: var(--text-secondary); }
+.error { color: var(--error-color); }
+.empty { padding: 24px; border: 1px dashed var(--border-color); border-radius: 12px; }
+@media (max-width: 600px) {
+  body { padding: 20px 14px; }
+  .card { padding: 18px; }
+  h1 { font-size: 24px; }
+  .detail { grid-template-columns: 78px minmax(0, 1fr); gap: 8px; }
+}
+@media (prefers-reduced-motion: reduce) { .card-body { transition: none; } }
+@media print {
+  button, .page-message { display: none; }
+  .grid { display: block; }
+  .card { break-inside: avoid; margin-bottom: 20px; box-shadow: none; }
+  .fill { background: repeating-linear-gradient(45deg, var(--meter-fill), var(--meter-fill) 2px, transparent 2px, transparent 4px); print-color-adjust: exact; }
+}
+@media (forced-colors: active) {
+  .track { border: 1px solid CanvasText; background: Canvas; forced-color-adjust: none; }
+  .fill { background: repeating-linear-gradient(45deg, CanvasText, CanvasText 2px, Canvas 2px, Canvas 4px); }
+  .error { color: CanvasText; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1>Qwen 额度</h1>
+      <p class="description">查看千问套餐、额度窗口与重置时间。</p>
+    </div>
+    <button id="refresh-all" type="button">刷新全部</button>
+  </header>
+  <p id="message" class="page-message muted" role="status" aria-live="polite" aria-atomic="true">正在读取 CLI 额度…</p>
+  <main id="app" aria-label="Qwen 凭证额度"></main>
+  <noscript><p class="error">读不到额度：请启用 JavaScript 后刷新页面。</p></noscript>
+</div>
+<script>
+// Same-origin parent theme synchronization follows the reference resource page.
+(() => {
+  try {
+    const parentDocument = window.parent && window.parent !== window ? window.parent.document : null;
+    const parentRoot = parentDocument && parentDocument.documentElement;
+    const syncTheme = () => {
+      if (!parentRoot) return;
+      const theme = parentRoot.getAttribute("data-theme");
+      if (theme === "white" || theme === "dark") document.documentElement.setAttribute("data-theme", theme);
+      else document.documentElement.removeAttribute("data-theme");
+      const secondary = getComputedStyle(parentRoot).getPropertyValue("--bg-secondary").trim();
+      if (secondary) document.documentElement.style.setProperty("--bg-secondary", secondary);
+      document.body.style.backgroundColor = secondary || "var(--bg-secondary)";
+      if (window.frameElement) {
+        window.frameElement.style.backgroundColor = secondary || "transparent";
+        if (window.frameElement.parentElement) window.frameElement.parentElement.style.backgroundColor = secondary || "transparent";
+      }
+    };
+    syncTheme();
+    if (parentRoot) new MutationObserver(syncTheme).observe(parentRoot, {attributes: true, attributeFilter: ["data-theme"]});
+  } catch (_) {}
+})();
+</script>
+<script>
+(() => {
+  "use strict";
+  const endpoint = "/v0/management/plugins/qwen-cliproxyapi/quota-usage";
+  const app = document.getElementById("app");
+  const message = document.getElementById("message");
+  const refreshAll = document.getElementById("refresh-all");
+  const numberFormat = new Intl.NumberFormat("zh-CN", {maximumFractionDigits: 2});
+  let cards = [];
+  let busy = false;
+  let refreshingIndex = null;
+
+  // Copied verbatim from the reference; reads the panel's existing auth only.
+  function auth() {
+    const raw = localStorage.getItem("cli-proxy-auth");
+    if (!raw) return "";
+    try {
+      let decoded = raw;
+      if (raw.startsWith("enc::v1::")) {
+        const bytes = Uint8Array.from(atob(raw.slice(9)), char => char.charCodeAt(0));
+        const seed = new TextEncoder().encode("cli-proxy-api-webui::secure-storage|" + location.host + "|" + navigator.userAgent);
+        for (let i = 0; i < bytes.length; i++) bytes[i] ^= seed[i % seed.length];
+        decoded = new TextDecoder().decode(bytes);
+      }
+      const parsed = JSON.parse(decoded);
+      if (parsed && parsed.state && parsed.state.managementKey) return typeof parsed.state.managementKey === "string" ? parsed.state.managementKey : "";
+      return "";
+    } catch (_) { return ""; }
+  }
+  function string(value) { return typeof value === "string" && value.trim() ? value : "未提供"; }
+  function finite(value) { return typeof value === "number" && Number.isFinite(value); }
+  function percent(value) { return finite(value) && value >= 0 && value <= 100 ? value : null; }
+  function percentage(value) { const n = percent(value); return n === null ? "未提供" : numberFormat.format(n) + "%"; }
+  function days(value) { return finite(value) ? numberFormat.format(value) + " 天" : "未提供"; }
+  function date(value) {
+    if (typeof value !== "string" || !value.trim()) return "未提供";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? "未提供（时间无效）" : value.replace("T", " ");
+  }
+  function node(tag, className, text) {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (text !== undefined) element.textContent = text;
+    return element;
+  }
+  function detail(list, label, value, className) {
+    const row = node("div", "detail");
+    row.append(node("dt", "", label), node("dd", className || "", value));
+    list.appendChild(row);
+  }
+  function metricValue(metric) {
+    if (!finite(metric.value)) return "未提供";
+    if (metric.format === "currency" && typeof metric.currency === "string" && /^[A-Z]{3}$/.test(metric.currency)) {
+      try { return new Intl.NumberFormat("zh-CN", {style: "currency", currency: metric.currency}).format(metric.value); } catch (_) {}
+    }
+    return numberFormat.format(metric.value) + (typeof metric.unit === "string" && metric.unit ? " " + metric.unit : "");
+  }
+  function windowName(value) {
+    const names = {"5h": "5 小时窗口", "1week": "每周窗口", "1month": "每月窗口"};
+    return Object.hasOwn(names, value) ? names[value] : string(value);
+  }
+  function renderWindow(window, parent) {
+    const row = node("div", "window");
+    const name = windowName(window.window);
+    row.appendChild(node("div", "window-name", name));
+    const percentages = node("div", "percentages");
+    percentages.append(node("span", "", "已用 " + percentage(window.usedPercent)), node("span", "", "剩余 " + percentage(window.remainingPercent)));
+    row.appendChild(percentages);
+    const used = percent(window.usedPercent);
+    if (used !== null) {
+      const meter = node("div", "meter-wrap");
+      meter.tabIndex = 0;
+      meter.setAttribute("role", "progressbar");
+      meter.setAttribute("aria-label", name + "已用额度");
+      meter.setAttribute("aria-valuemin", "0");
+      meter.setAttribute("aria-valuemax", "100");
+      meter.setAttribute("aria-valuenow", String(used));
+      const readout = "已用 " + percentage(window.usedPercent) + " · 剩余 " + percentage(window.remainingPercent);
+      meter.setAttribute("aria-valuetext", readout);
+      const track = node("div", "track");
+      const fill = node("div", "fill");
+      fill.style.width = used + "%";
+      track.appendChild(fill);
+      meter.append(track, node("span", "tooltip", readout));
+      row.appendChild(meter);
+    } else {
+      row.appendChild(node("p", "muted", "已用比例未提供，无法绘制进度条。"));
+    }
+    const meta = node("div", "window-meta");
+    meta.append(node("p", "", "重置时间：" + date(window.resetTime)), node("p", "", "距重置：" + days(window.resetsInDays)));
+    row.appendChild(meta);
+    parent.appendChild(row);
+  }
+  function render() {
+    app.textContent = "";
+    refreshAll.disabled = busy;
+    refreshAll.textContent = busy && refreshingIndex === null ? "正在刷新…" : "刷新全部";
+    app.setAttribute("aria-busy", String(busy));
+    if (!cards.length) {
+      if (!busy) app.appendChild(node("p", "empty muted", "暂无可显示的 Qwen 凭证。请检查插件凭证配置，或点击刷新全部重试。"));
+      return;
+    }
+    const grid = node("div", "grid");
+    cards.forEach(card => {
+      const active = busy && (refreshingIndex === null || refreshingIndex === card.auth_index);
+      const section = node("section", "card");
+      section.setAttribute("aria-busy", String(active));
+      const header = node("div", "card-header");
+      const button = node("button", "", active ? "正在刷新…" : "刷新");
+      button.type = "button";
+      button.disabled = busy;
+      button.setAttribute("aria-label", "刷新 " + string(card.label));
+      button.dataset.authIndex = card.auth_index;
+      button.addEventListener("click", () => refresh(card.auth_index));
+      header.append(node("h2", "", string(card.label)), button);
+      section.appendChild(header);
+      const content = node("div", "card-body");
+      if (card.error !== null) {
+        content.appendChild(node("p", "error", "读不到额度：" + (card.error || "CLI 返回了空错误")));
+        content.appendChild(node("p", "observed", "数据来自 CLI（本次读取失败，无可用观测）"));
+      } else {
+        const plan = node("div", "section");
+        plan.append(node("h3", "", "套餐"), node("p", "plan", string(card.plan)), node("p", "plan-status", "状态：" + string(card.planStatus)));
+        const period = node("dl", "");
+        if (typeof card.planStart === "string" && card.planStart.trim()) detail(period, "生效日", date(card.planStart));
+        detail(period, "到期日", date(card.planEnd));
+        // An omitted plan end must not turn an optional zero-valued daysLeft into a claim.
+        detail(period, "剩余天数", date(card.planEnd) !== "未提供" && !Number.isNaN(Date.parse(card.planEnd)) ? days(card.daysLeft) : "未提供", "days");
+        plan.appendChild(period);
+        content.appendChild(plan);
+        const quota = node("div", "section");
+        quota.appendChild(node("h3", "", "额度"));
+        const windows = Array.isArray(card.windows) ? card.windows.filter(item => item && typeof item === "object" && !Array.isArray(item)) : [];
+        if (windows.length) windows.forEach(window => renderWindow(window, quota));
+        else quota.appendChild(node("p", "muted", "CLI 未提供额度窗口。"));
+        content.appendChild(quota);
+        const metrics = Array.isArray(card.metrics) ? card.metrics.filter(item => item && typeof item === "object" && !Array.isArray(item)) : [];
+        if (metrics.length) {
+          const extra = node("div", "section");
+          extra.appendChild(node("h3", "", "其他指标"));
+          const table = node("table", "metrics");
+          table.setAttribute("aria-label", "CLI 额度指标");
+          const body = node("tbody", "");
+          metrics.forEach(metric => {
+            const row = node("tr", "");
+            const label = node("th", "", string(metric.label));
+            label.scope = "row";
+            row.append(label, node("td", "", metricValue(metric)));
+            body.appendChild(row);
+          });
+          table.appendChild(body);
+          extra.appendChild(table);
+          content.appendChild(extra);
+        }
+        content.appendChild(node("p", "observed", "数据来自 CLI（观测时间 " + date(card.observedAt) + "）"));
+      }
+      section.appendChild(content);
+      grid.appendChild(section);
+    });
+    app.appendChild(grid);
+  }
+  async function request(body) {
+    const headers = {"Content-Type": "application/json"};
+    let key = "";
+    try { key = auth(); } catch (_) {}
+    if (key) headers.Authorization = "Bearer " + key;
+    let response;
+    try {
+      response = await fetch(endpoint, {method: "POST", headers, body: JSON.stringify(body), credentials: "same-origin", mode: "same-origin", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(120000)});
+    } catch (error) {
+      throw new Error(error.name === "TimeoutError" ? "CLI 读取超时，请重试。" : "无法连接额度接口，请检查连接后重试。");
+    }
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      const reason = data && typeof data.error === "string" && data.error ? data.error : "额度接口返回 HTTP " + response.status;
+      throw new Error(reason + (response.status === 401 || response.status === 403 ? "。请在管理中心登录并启用“记住密码”，然后重试。" : ""));
+    }
+    if (!data || !Array.isArray(data.cards)) throw new Error("额度接口未返回 cards 数组。");
+    const seen = new Set();
+    return data.cards.map(card => {
+      if (!card || typeof card !== "object" || typeof card.auth_index !== "string" || !card.auth_index || seen.has(card.auth_index) || (card.error !== null && typeof card.error !== "string")) throw new Error("额度接口返回了无效的凭证卡片。");
+      seen.add(card.auth_index);
+      const hasReading = (Array.isArray(card.windows) && card.windows.some(item => item && typeof item === "object" && !Array.isArray(item))) || (Array.isArray(card.metrics) && card.metrics.some(item => item && typeof item === "object" && !Array.isArray(item)));
+      return card.error === null && !hasReading ? failedCard(card, "CLI 未返回额度窗口或指标。") : card;
+    });
+  }
+  // Failed refreshes retain identity only, never a stale successful reading.
+  function failedCard(card, error) { return {auth_index: card.auth_index, label: card.label, error}; }
+  async function refresh(authIndex = null) {
+    if (busy) return;
+    const restoreFocus = app.contains(document.activeElement);
+    busy = true;
+    refreshingIndex = authIndex;
+    message.className = "page-message muted";
+    message.textContent = cards.length ? "正在刷新 CLI 额度，下方为上次观测，尚未更新…" : "正在读取 CLI 额度…";
+    render();
+    try {
+      const fresh = await request(authIndex === null ? {} : {auth_index: authIndex});
+      if (authIndex === null) cards = fresh;
+      else {
+        const updated = fresh.find(card => card.auth_index === authIndex);
+        if (!updated) throw new Error("额度接口未返回所选凭证。");
+        cards = cards.map(card => card.auth_index === authIndex ? updated : card);
+      }
+      const failures = cards.filter(card => card.error !== null).length;
+      message.className = "page-message " + (failures ? "error" : "muted");
+      message.textContent = failures ? "读取完成，" + failures + " 个凭证读不到额度，详见卡片。" : cards.length ? "读取完成。读数以 CLI 观测时间为准。" : "未找到已配置的 Qwen 凭证。";
+    } catch (error) {
+      const reason = error.message || "读取失败，请重试。";
+      cards = cards.map(card => authIndex === null || card.auth_index === authIndex ? failedCard(card, reason) : card);
+      message.className = "page-message error";
+      message.textContent = "读不到额度：" + reason;
+    } finally {
+      busy = false;
+      refreshingIndex = null;
+      render();
+      if (restoreFocus && authIndex !== null) {
+        const button = Array.from(app.querySelectorAll("button")).find(item => item.dataset.authIndex === authIndex);
+        if (button) button.focus();
+      }
+    }
+  }
+  refreshAll.addEventListener("click", () => refresh());
+  refresh();
+})();
+</script>
+</body>
+</html>

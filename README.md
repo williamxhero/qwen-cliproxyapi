@@ -17,6 +17,7 @@ Expose one provider, **`qwen`**, using CLIProxyAPI's credential scheduler, rotat
 - OpenAI Chat Completions and Anthropic Messages requests, tool calls, image parts and streaming SSE translation, adapted from the MIT reference.
 - Authenticated catalog discovery, optional `qwen/` prefix, last-good snapshot and built-in initial fallback.
 - Native quota groups, windows, subscription and metrics from an external CLI; no shell invocation, hard timeout, no invented readings.
+- Plugin-registered **Qwen 额度** management page: 套餐/status/expiry/remaining days, per-window progress and reset countdowns, CLI observation time, and per-credential/all refresh buttons. Embedded HTML requires no runtime resource files.
 - Standalone stdlib-only Go CLI: already-logged-in browser via `bsk`, or explicitly supplied cookie for service/session-0 environments.
 
 ## Requirements
@@ -122,6 +123,24 @@ The CLI exits 0 only with a genuine reading (or a successful `--check`). Failure
 The plugin maps windows to `QuotaBucket` (`remainingFraction = 1 - usedPercent/100`, clamped), preserves reset timestamps, maps metrics to `Summary` and plan to `Subscription.Plan`. No windows and no metrics is an error; subprocess failure, timeout or invalid JSON does not fabricate a balance.
 
 Use `GET /v0/management/quota/providers` to discover support, then `POST /v0/management/quota/fetch` with `{"auth_index":"<credential index>"}` and management authorization. Console quota is **account-scoped**, not derivable from a plan API key: configure a console login corresponding to the credential's account. Multiple keys sharing one CLI login will display that login's account readings.
+
+### Qwen 额度 management page
+
+The panel's generic credential quota card only recognizes a built-in provider list. Open **Qwen 额度** from the panel's plugin/resource menu instead. The plugin registers `/quota`, served as `GET /v0/resource/plugins/qwen-cliproxyapi/quota`; its self-contained page posts to the same-origin `/v0/management/plugins/qwen-cliproxyapi/quota-usage`. The existing `/quota-info` endpoint and native quota API remain available.
+
+Sign into the management panel with **Remember password** enabled, as required by the MIT reference page. The embedded page decodes the host's `cli-proxy-auth` local storage (including `enc::v1::`) at request time and supplies management authorization; it never embeds a management key or sends requests to a third-party origin. If credentials cannot be accessed or the host rejects authorization, it displays the error rather than fake quota.
+
+`quota-usage` returns `{"cards":[...]}`. An empty body or `{}` refreshes all configured Qwen credentials; `{"auth_index":"<host credential index>"}` refreshes one. Indexes come from the host credential list, not the API-key hash; unknown indexes return 404. A CLI failure remains a card with `error` containing the CLI diagnostic and no fabricated reading. The page displays **读不到额度：<错误>** and clears old reading values on failed refresh.
+
+Optional `planStart`, `planEnd` and `daysLeft` extend the existing CLI contract. Subscription timestamps come only from console-reported millisecond epochs; `daysLeft = ceil((planEnd - now) / 24h)`. Missing/invalid periods stay omitted and display **未提供**. Window `resetsInDays` follows the same ceiling rule; expired periods can be zero or negative. Neither countdown implies unused quota.
+
+For a service that cannot reach the interactive browser, refresh a protected cache periodically from the user session:
+
+```powershell
+.\bin\bailian-quota.exe --json --timeout 120s --cache-file C:\ProgramData\cpa-qwen-quota\qwen-quota.json
+```
+
+Then set `command-args: ["--json", "--cache-only", "--cache-file", "C:/ProgramData/cpa-qwen-quota/qwen-quota.json", "--max-age", "45m"]`. Cache-only never starts a browser and fails honestly for missing, invalid or stale readings. Refresh buttons rerun the configured CLI; in cache-only mode they reload the last observation, **not** the console. The page always shows the CLI's `observedAt`. Old caches without a subscription period remain readable but cannot reveal remaining plan days until a successful console refresh by the rebuilt CLI.
 
 ## Testing
 
