@@ -51,7 +51,8 @@ func (m *Manager) registerManagement(request []byte) ([]byte, error) {
 			Menu        string `json:"menu"`
 			Description string `json:"description"`
 		}{
-			{Path: "/quota", Menu: "Qwen 额度", Description: "查看千问套餐、额度窗口与重置时间。"},
+			// The quota page is served but deliberately NOT listed as a panel menu:
+			// the credential card shows the same data, and the menu entry was noise.
 			{Path: "/logo.svg"},
 		},
 	}), nil

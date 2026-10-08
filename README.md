@@ -17,7 +17,7 @@ Expose one provider, **`qwen`**, using CLIProxyAPI's credential scheduler, rotat
 - OpenAI Chat Completions and Anthropic Messages requests, tool calls, image parts and streaming SSE translation, adapted from the MIT reference.
 - Authenticated catalog discovery, optional `qwen/` prefix, last-good snapshot and built-in initial fallback.
 - Native quota groups, windows, subscription and metrics from an external CLI; no shell invocation, hard timeout, no invented readings.
-- Plugin-registered **Qwen 额度** management page: 套餐/status/expiry/remaining days, per-window progress and reset countdowns, CLI observation time, and per-credential/all refresh buttons. Embedded HTML requires no runtime resource files.
+- Plugin-registered quota API for the panel: 套餐/status/expiry/remaining days, per-window progress and reset countdowns, CLI observation time, and per-credential/all refresh buttons (`POST /v0/management/plugins/qwen-cliproxyapi/quota-usage`). An embedded HTML view is served at `GET /v0/resource/plugins/qwen-cliproxyapi/quota` for manual use, but it is deliberately **not** advertised as a panel menu.
 - Standalone stdlib-only Go CLI: already-logged-in browser via `bsk`, or explicitly supplied cookie for service/session-0 environments.
 
 ## Requirements
@@ -91,7 +91,7 @@ For Coding Plan use `https://coding.dashscope.aliyuncs.com/v1` (CN) or `https://
 
 ## Panel API-key form
 
-Registration displays **QWen Plan API Key** with an original embedded Q monogram at `/v0/resource/plugins/qwen-cliproxyapi/logo.svg`. The existing **Qwen 额度** menu is unchanged; panel-created credentials are included in that page.
+Registration displays **QWen Plan API Key** with an original embedded Q monogram at `/v0/resource/plugins/qwen-cliproxyapi/logo.svg`. Panel-created credentials are included in the quota API, so the credential card and the standalone page report the same data.
 
 With management authorization, submit `POST /v0/management/plugins/qwen-cliproxyapi/credentials` with `base_url`, `api_key`, and optional `name`. The default label is `Qwen`. Unknown fields are ignored. URLs must be HTTP/HTTPS with a hostname and without userinfo, query, or fragment; explicit HTTP panel credentials are accepted independently of the config-only `allow-http` switch. Prefer HTTPS outside local tests. Empty/whitespace keys and control characters are rejected. Successful responses contain only `ok`, the `qwen-key-<sha256>` ID, and the label; keys are never returned or logged. A label containing the submitted key is redacted. Duplicate key + normalized base URL returns 409, including configured and imported credentials. Unreadable existing Qwen storage fails closed with 502.
 
@@ -172,9 +172,15 @@ The plugin maps windows to `QuotaBucket` (`remainingFraction = 1 - usedPercent/1
 
 Use `GET /v0/management/quota/providers` to discover support, then `POST /v0/management/quota/fetch` with `{"auth_index":"<credential index>"}` and management authorization. Console quota is **account-scoped**, not derivable from a plan API key: configure a console login corresponding to the credential's account. Multiple keys sharing one CLI login will display that login's account readings.
 
-### Qwen 额度 management page
+### Quota surfaces
 
-The panel's generic credential quota card only recognizes a built-in provider list. Open **Qwen 额度** from the panel's plugin/resource menu instead. The plugin registers `/quota`, served as `GET /v0/resource/plugins/qwen-cliproxyapi/quota`; its self-contained page posts to the same-origin `/v0/management/plugins/qwen-cliproxyapi/quota-usage`. The existing `/quota-info` endpoint and native quota API remain available.
+Three ways to read the same numbers, all backed by the CLI:
+
+1. **The panel's credential card** (primary) — a panel-side adapter calls `POST /v0/management/plugins/qwen-cliproxyapi/quota-usage` and renders 套餐 / 额度 / 剩余天数 / 刷新.
+2. **The native v8 quota API** — `POST /v0/management/quota/fetch {"auth_index": "..."}` (also what `/v0/management/quota/providers` advertises).
+3. **The raw page** — `GET /v0/resource/plugins/qwen-cliproxyapi/quota` serves a self-contained HTML view for manual use; it posts to the same-origin `quota-usage` route. It is intentionally not listed as a panel menu, so it does not add a nav entry.
+
+The `/quota-info` endpoint remains available.
 
 Sign into the management panel with **Remember password** enabled, as required by the MIT reference page. The embedded page decodes the host's `cli-proxy-auth` local storage (including `enc::v1::`) at request time and supplies management authorization; it never embeds a management key or sends requests to a third-party origin. If credentials cannot be accessed or the host rejects authorization, it displays the error rather than fake quota.
 

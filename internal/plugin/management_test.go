@@ -28,7 +28,7 @@ func TestManagementRegisterReferenceEnvelope(t *testing.T) {
 		Resources []struct{ Path, Menu, Description string } `json:"resources"`
 	}
 	decodeResult(t, raw, &result)
-	if len(result.Resources) != 2 || result.Resources[1].Path != "/logo.svg" || result.Resources[1].Menu != "" || result.Resources[0].Path != "/quota" || result.Resources[0].Menu != "Qwen 额度" || result.Resources[0].Description != "查看千问套餐、额度窗口与重置时间。" {
+	if len(result.Resources) != 1 || result.Resources[0].Path != "/logo.svg" || result.Resources[0].Menu != "" {
 		t.Fatalf("wrong resource envelope: %s", raw)
 	}
 	found := false
