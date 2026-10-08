@@ -44,12 +44,16 @@ func (m *Manager) registerManagement(request []byte) ([]byte, error) {
 		}{
 			{Method: http.MethodGet, Path: "/plugins/" + pluginName + "/quota-info"},
 			{Method: http.MethodPost, Path: "/plugins/" + pluginName + "/quota-usage"},
+			{Method: http.MethodPost, Path: "/plugins/" + pluginName + "/credentials"},
 		},
 		Resources: []struct {
 			Path        string `json:"path"`
 			Menu        string `json:"menu"`
 			Description string `json:"description"`
-		}{{Path: "/quota", Menu: "Qwen 额度", Description: "查看千问套餐、额度窗口与重置时间。"}},
+		}{
+			{Path: "/quota", Menu: "Qwen 额度", Description: "查看千问套餐、额度窗口与重置时间。"},
+			{Path: "/logo.svg"},
+		},
 	}), nil
 }
 
@@ -66,6 +70,12 @@ func (m *Manager) handleManagement(request []byte) ([]byte, error) {
 }
 
 func (m *Manager) HandleManagement(ctx context.Context, req pluginapi.ManagementRequest) (pluginapi.ManagementResponse, error) {
+	if req.Method == http.MethodGet && req.Path == "/v0/resource/plugins/"+pluginName+"/logo.svg" {
+		return pluginapi.ManagementResponse{StatusCode: http.StatusOK, Headers: http.Header{"Content-Type": {"image/svg+xml"}}, Body: []byte(resources.Logo)}, nil
+	}
+	if req.Method == http.MethodPost && req.Path == "/v0/management/plugins/"+pluginName+"/credentials" {
+		return m.writeCredential(ctx, req.Body)
+	}
 	if req.Method == http.MethodGet && req.Path == "/v0/resource/plugins/"+pluginName+"/quota" {
 		return pluginapi.ManagementResponse{
 			StatusCode: http.StatusOK,
@@ -184,6 +194,26 @@ func (m *Manager) quotaCredentials(ctx context.Context, cfg config.Config) ([]qu
 		if !found {
 			return nil, fmt.Errorf("configured Qwen credential is not available in the host")
 		}
+	}
+	// Panel-added credentials need not appear in api-keys. Include host-owned
+	// Qwen records without changing configured credentials' labels or ordering.
+	seen := make(map[string]bool, len(cards))
+	for _, card := range cards {
+		seen[card.AuthIndex] = true
+	}
+	for _, entry := range entries {
+		if entry.Provider != ProviderID && entry.Type != ProviderID || seen[entry.AuthIndex] {
+			continue
+		}
+		if strings.TrimSpace(entry.AuthIndex) == "" {
+			return nil, fmt.Errorf("host credential index is unavailable")
+		}
+		label := strings.TrimSpace(entry.Label)
+		if label == "" {
+			label = "Qwen"
+		}
+		cards = append(cards, quotaCard{AuthIndex: entry.AuthIndex, Label: redactSecrets(label, cfg, ""), Windows: []quotaWindow{}, Metrics: []pluginapi.QuotaMetric{}})
+		seen[entry.AuthIndex] = true
 	}
 	return cards, nil
 }

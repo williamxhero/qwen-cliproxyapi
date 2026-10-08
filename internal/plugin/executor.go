@@ -66,6 +66,24 @@ func (m *Manager) resolveExecution(req executorRequest) (*resolvedExecution, []b
 	if key == "" {
 		return nil, classEnvelope(&errclass.Error{Class: errclass.ClassAuth, Message: "selected auth has no api key"})
 	}
+	// Attributes are restored by auth.parse; storage is retained by the host
+	// across reloads and also supports older host execution snapshots.
+	baseURL := req.AuthAttributes["base_url"]
+	if baseURL == "" && len(req.StorageJSON) > 0 {
+		var record struct {
+			BaseURL string `json:"base_url"`
+		}
+		if json.Unmarshal(req.StorageJSON, &record) != nil {
+			return nil, classEnvelope(&errclass.Error{Class: errclass.ClassAuth, Message: "selected auth has invalid storage"})
+		}
+		baseURL = record.BaseURL
+	}
+	if baseURL != "" {
+		if err := config.ValidateCredentialBaseURL(baseURL); err != nil {
+			return nil, classEnvelope(&errclass.Error{Class: errclass.ClassAuth, Message: "selected auth has invalid base_url"})
+		}
+		cfg.BaseURL = strings.TrimRight(baseURL, "/")
+	}
 	var rec catalog.ModelRecord
 	var found bool
 	if mgr != nil && req.Model != "" {
@@ -103,8 +121,8 @@ func (m *Manager) handleExecute(request []byte) ([]byte, error) {
 	}
 
 	url := catalog.JoinUpstreamURL(res.cfg.BaseURL, res.rec.EndpointPath)
-	debugTrace("executor resolved public_model=%s upstream_model=%s route=%s url=%s key_count=%d", req.Model, res.rec.UpstreamID, res.rec.Protocol, url, len(res.cfg.APIKeys))
-	debugTrace("executor sending non-stream url=%s body_len=%d", url, len(upstreamBody))
+	debugTrace("executor resolved public_model=%s upstream_model=%s route=%s url=%s key_count=%d", req.Model, res.rec.UpstreamID, res.rec.Protocol, redactSecrets(url, res.cfg, res.key), len(res.cfg.APIKeys))
+	debugTrace("executor sending non-stream url=%s body_len=%d", redactSecrets(url, res.cfg, res.key), len(upstreamBody))
 	ctx, cancel := context.WithTimeout(context.Background(), res.cfg.RequestTimeout)
 	defer cancel()
 	resp, err := m.bridge.Do(ctx, pluginapi.HTTPRequest{
@@ -227,7 +245,7 @@ func (m *Manager) executeStream(req executorRequest) ([]byte, error) {
 	upstreamBody, _ = json.Marshal(streamBody)
 
 	url := catalog.JoinUpstreamURL(res.cfg.BaseURL, res.rec.EndpointPath)
-	debugTrace("executor sending stream url=%s body_len=%d", url, len(upstreamBody))
+	debugTrace("executor sending stream url=%s body_len=%d", redactSecrets(url, res.cfg, res.key), len(upstreamBody))
 	ctx, cancel := context.WithTimeout(context.Background(), res.cfg.RequestTimeout)
 	defer cancel()
 	st, _, id, err := m.bridge.DoStream(ctx, pluginapi.HTTPRequest{

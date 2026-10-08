@@ -189,10 +189,10 @@ func (c Config) validate() error {
 
 func validateURL(name, raw string, allowHTTP bool) error {
 	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.Scheme == "" {
+	if err != nil || u.Hostname() == "" || u.Scheme == "" {
 		return fmt.Errorf("%s: invalid URL", name)
 	}
-	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.User != nil {
+	if u.RawQuery != "" || u.ForceQuery || strings.Contains(raw, "#") || u.User != nil {
 		return fmt.Errorf("%s: must not contain query, fragment, or userinfo", name)
 	}
 	switch u.Scheme {
@@ -206,6 +206,13 @@ func validateURL(name, raw string, allowHTTP bool) error {
 	}
 	return nil
 }
+
+// ValidateCredentialBaseURL shares config URL rules, allowing explicit HTTP
+// credentials as well as HTTPS. Validation errors never include the URL.
+func ValidateCredentialBaseURL(raw string) error {
+	return validateURL("base_url", raw, true)
+}
+
 func validPrefix(s string) bool {
 	if s == "" {
 		return false

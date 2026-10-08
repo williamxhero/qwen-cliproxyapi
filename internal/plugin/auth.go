@@ -2,10 +2,12 @@ package plugin
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"qwen-cliproxyapi/internal/config"
 	"strings"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
@@ -24,6 +26,7 @@ func (p authProvider) ParseAuth(_ context.Context, req pluginapi.AuthParseReques
 		ID       string `json:"id"`
 		Label    string `json:"label"`
 		APIKey   string `json:"api_key"`
+		BaseURL  string `json:"base_url"`
 	}
 	if err := json.Unmarshal(req.RawJSON, &raw); err != nil {
 		if req.Provider == ProviderID {
@@ -41,14 +44,41 @@ func (p authProvider) ParseAuth(_ context.Context, req pluginapi.AuthParseReques
 		raw.ID = req.FileName
 	}
 	debugTrace("auth parse handled provider=%s file=%s id=%s api_key_present=%t api_key_length=%d", req.Provider, req.FileName, raw.ID, strings.TrimSpace(raw.APIKey) != "", len(raw.APIKey))
+	attributes := map[string]string{"api_key": raw.APIKey}
+	if raw.BaseURL != "" {
+		if err := config.ValidateCredentialBaseURL(raw.BaseURL); err != nil {
+			return pluginapi.AuthParseResponse{}, fmt.Errorf("qwen auth record has invalid base_url")
+		}
+		attributes["base_url"] = raw.BaseURL
+		// host.auth.save initially registers the filename as its runtime ID.
+		// Match it on watcher parsing to update, not duplicate, panel records.
+		// Legacy configured credentials retain their existing bare-hash IDs.
+		if req.FileName != "" {
+			raw.ID = req.FileName
+		}
+	}
+	label := accountLabel(p.cfg, raw.APIKey, raw.Label, 0)
+	if raw.BaseURL != "" && strings.TrimSpace(raw.Label) != "" {
+		label = raw.Label
+	}
 	return pluginapi.AuthParseResponse{Handled: true, Auth: pluginapi.AuthData{
-		Provider: ProviderID, ID: raw.ID, FileName: req.FileName, Label: accountLabel(p.cfg, raw.APIKey, raw.Label, 0), StorageJSON: req.RawJSON,
-		Attributes: map[string]string{"api_key": raw.APIKey},
+		Provider: ProviderID, ID: raw.ID, FileName: req.FileName, Label: label, StorageJSON: req.RawJSON,
+		Attributes: attributes,
 	}}, nil
 }
 
 func (authProvider) StartLogin(context.Context, pluginapi.AuthLoginStartRequest) (pluginapi.AuthLoginStartResponse, error) {
-	return pluginapi.AuthLoginStartResponse{}, fmt.Errorf("qwen login is unsupported; configure a manual api key")
+	// The host requires a state even for a manual form; this is not OAuth.
+	return pluginapi.AuthLoginStartResponse{Provider: ProviderID, State: rand.Text(), ExpiresAt: time.Now().Add(10 * time.Minute), Metadata: map[string]any{
+		"auth_kind":    "manual_api_key",
+		"submit_path":  "/v0/management/plugins/" + pluginName + "/credentials",
+		"submit_label": "添加凭证",
+		"fields": []map[string]any{
+			{"name": "base_url", "label": "Base URL", "placeholder": config.DefaultBaseURL, "required": true},
+			{"name": "api_key", "label": "API Key", "type": "password", "required": true},
+			{"name": "name", "label": "凭证名称", "required": false},
+		},
+	}}, nil
 }
 
 func (authProvider) PollLogin(context.Context, pluginapi.AuthLoginPollRequest) (pluginapi.AuthLoginPollResponse, error) {

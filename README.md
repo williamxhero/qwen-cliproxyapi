@@ -43,9 +43,11 @@ Set the key in the **host process environment** rather than storing it in this r
 
 ```yaml
 plugins:
+  enabled: true
   dir: "D:\\WILL\\AGENT\\CPA\\qwen-cliproxyapi\\plugins"
   configs:
     qwen-cliproxyapi:
+      enabled: true
       base-url: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
       api-keys:
         - value: "${QWEN_API_KEY}"
@@ -86,6 +88,18 @@ plugins:
 Without an explicit key name labels are `Qwen 1`, `Qwen 2`, etc. IDs depend on the key hash, not label or ordering. Removed configuration keys are not automatically deleted from the host auth directory: the ABI has no deletion callback. Manage stale credentials explicitly in the host.
 
 For Coding Plan use `https://coding.dashscope.aliyuncs.com/v1` (CN) or `https://coding-intl.dashscope.aliyuncs.com/v1` (international). Coding Plan keys typically start with `sk-sp-`. All execution goes to `{base-url}/chat/completions`; no fallback to another provider or credential is performed by the plugin.
+
+## Panel API-key form
+
+Registration displays **QWen Plan API Key** with an original embedded Q monogram at `/v0/resource/plugins/qwen-cliproxyapi/logo.svg`. The existing **Qwen 额度** menu is unchanged; panel-created credentials are included in that page.
+
+With management authorization, submit `POST /v0/management/plugins/qwen-cliproxyapi/credentials` with `base_url`, `api_key`, and optional `name`. The default label is `Qwen`. Unknown fields are ignored. URLs must be HTTP/HTTPS with a hostname and without userinfo, query, or fragment; explicit HTTP panel credentials are accepted independently of the config-only `allow-http` switch. Prefer HTTPS outside local tests. Empty/whitespace keys and control characters are rejected. Successful responses contain only `ok`, the `qwen-key-<sha256>` ID, and the label; keys are never returned or logged. A label containing the submitted key is redacted. Duplicate key + normalized base URL returns 409, including configured and imported credentials. Unreadable existing Qwen storage fails closed with 502.
+
+The host saves the same top-level `type`, `id`, `label`, and `api_key` schema as configured credentials, plus `base_url`. Panel IDs hash the key and URL together, so the same key can target distinct URLs without overwriting a credential. Existing configured-key IDs remain unchanged. Panel parsing uses the host's filename-based runtime ID (`<returned id>.json`) so watcher parsing updates the initially saved record instead of creating a duplicate runtime credential. Execution resolves `base_url` from the selected credential's attributes, then persisted storage, then the plugin config; both streaming and non-streaming use that result. Parsing/reloading and refresh preserve the URL and panel label. Model discovery still uses the configured key/base URL, not a separate catalogue per panel credential; at least one configured key remains required.
+
+`auth.login.start` returns the manual form specification in `Metadata` (`auth_kind: manual_api_key`, the credential submit path, **添加凭证**, and Base URL/API Key/凭证名称 fields). An opaque state satisfies the host's login-start validation; it is not an OAuth flow, and the form does not need polling. Empirical isolated-core verification at 8399 returned HTTP 200 with only `state`, `status: "ok"`, and `url: ""`: **the host does not forward Metadata**. The panel must use its allowlist fallback; the metadata form path is not functional through this host's management response.
+
+**Persistence limitation:** the v8 `host.auth.save` implementation writes directly to the destination before runtime registration, without a transactional rollback/delete callback. The plugin serializes its own duplicate checks/submissions, creates no local credential state before save confirmation, and returns a safe 502 on host rejection. It cannot guarantee that a failing host write leaves no partial file, or that a timed-out callback cannot later complete. Full failure atomicity requires a host-side transactional save; do not interpret a 502 as proof that no credential exists. No host source or live deployment is modified here.
 
 ## Model catalogue
 
