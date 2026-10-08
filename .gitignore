@@ -1,0 +1,17 @@
+# Hermes worker scaffolding — never publish
+prompt*.md
+worker*.json
+worker*.log
+*.local.json
+
+# build output / local scratch
+bin/
+dist-local/
+plugins/windows/amd64/*.h
+*.dll
+*.so
+*.dylib
+
+# local secrets (never commit)
+*.secret
+aliyun-ak*.json
