@@ -172,6 +172,14 @@ The plugin maps windows to `QuotaBucket` (`remainingFraction = 1 - usedPercent/1
 
 Use `GET /v0/management/quota/providers` to discover support, then `POST /v0/management/quota/fetch` with `{"auth_index":"<credential index>"}` and management authorization. Console quota is **account-scoped**, not derivable from a plan API key: configure a console login corresponding to the credential's account. Multiple keys sharing one CLI login will display that login's account readings.
 
+### Credential naming
+
+The panel shows a credential's **label**, resolved the same way on every surface:
+
+* if you gave it an **alias** (the optional `别名 (Alias)` field, or a config `api-keys` entry's `name`), the alias is shown;
+* otherwise the label is the **API key masked as `first4...last4`** (e.g. `sk-s...9abc`; short keys are masked harder), so two credentials stay distinguishable in the panel without the secret being readable;
+* a label the plugin generated itself under the old naming (`Qwen 3`) is replaced by the mask on the next materialisation, while a label you chose by hand is preserved.
+
 ### Quota surfaces
 
 Three ways to read the same numbers, all backed by the CLI:

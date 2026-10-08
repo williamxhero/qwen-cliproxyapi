@@ -72,7 +72,7 @@ func TestProviderRegistrationAndCredentialMaterialization(t *testing.T) {
 	id := "qwen-key-" + hex.EncodeToString(digest[:])
 	var record map[string]string
 	_ = json.Unmarshal(saved.JSON, &record)
-	if saved.Name != id+".json" || record["id"] != id || record["label"] != "Qwen 1" || record["type"] != "qwen" {
+	if saved.Name != id+".json" || record["id"] != id || record["label"] != maskAPIKey("dummy-config-key") || record["type"] != "qwen" {
 		t.Fatalf("bad credential: %s %s", saved.Name, saved.JSON)
 	}
 	raw, _ = m.HandleCall(pluginabi.MethodPluginReconfigure, lifecycleBody(yaml))
@@ -101,7 +101,7 @@ func TestCredentialStableNamesOrderAndLabels(t *testing.T) {
 		_ = json.Unmarshal(call.payload, &saved)
 		var record map[string]string
 		_ = json.Unmarshal(saved.JSON, &record)
-		want := []string{"Qwen 1", "Work"}[i]
+		want := []string{maskAPIKey("dummy-a"), "Work"}[i]
 		if record["label"] != want || saved.Name != record["id"]+".json" {
 			t.Fatalf("bad credential: %s", saved.JSON)
 		}

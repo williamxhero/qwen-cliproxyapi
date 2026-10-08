@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"qwen-cliproxyapi/internal/config"
+	"regexp"
 	"strings"
 	"time"
 
@@ -76,7 +77,7 @@ func (authProvider) StartLogin(context.Context, pluginapi.AuthLoginStartRequest)
 		"fields": []map[string]any{
 			{"name": "base_url", "label": "Base URL", "placeholder": config.DefaultBaseURL, "required": true},
 			{"name": "api_key", "label": "API Key", "type": "password", "required": true},
-			{"name": "name", "label": "凭证名称", "required": false},
+			{"name": "name", "label": "别名 (Alias)", "placeholder": "留空则显示脱敏 API Key", "required": false},
 		},
 	}}, nil
 }
@@ -114,8 +115,31 @@ func accountLabel(cfg config.Config, key, existing string, fallbackIndex int) st
 		}
 	}
 	label := strings.TrimSpace(existing)
-	if label != "" && !strings.HasPrefix(label, "Qwen credential ") && !strings.HasPrefix(label, "qwen-key-") {
+	if label != "" && !strings.HasPrefix(label, "Qwen credential ") && !strings.HasPrefix(label, "qwen-key-") && !defaultQwenLabelRe.MatchString(label) {
+		return label
+	}
+	if label := maskAPIKey(key); label != "" {
 		return label
 	}
 	return fmt.Sprintf("Qwen %d", index+1)
+}
+
+var defaultQwenLabelRe = regexp.MustCompile(`^Qwen \d+$`)
+
+// maskAPIKey renders a key as first4...last4 (shorter keys are masked harder) so a
+// credential without an alias is still distinguishable in the panel without exposing it.
+func maskAPIKey(key string) string {
+	runes := []rune(strings.TrimSpace(key))
+	switch {
+	case len(runes) >= 12:
+		return string(runes[:4]) + "..." + string(runes[len(runes)-4:])
+	case len(runes) >= 8:
+		return string(runes[:2]) + "..." + string(runes[len(runes)-2:])
+	case len(runes) >= 2:
+		return string(runes[:1]) + "..." + string(runes[len(runes)-1:])
+	case len(runes) == 1:
+		return "..."
+	default:
+		return ""
+	}
 }

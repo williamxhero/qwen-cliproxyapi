@@ -73,7 +73,9 @@ func (m *Manager) writeCredential(ctx context.Context, body []byte) (pluginapi.M
 	}
 	label := strings.TrimSpace(input.Name)
 	if label == "" {
-		label = "Qwen"
+		// No alias: present the key masked as first4...last4 so operators can tell
+		// credentials apart without the secret being readable.
+		label = maskAPIKey(input.APIKey)
 	}
 	label = redactSecrets(label, cfg, input.APIKey)
 	record, err := json.Marshal(credentialRecord{Type: ProviderID, ID: id, Label: label, APIKey: input.APIKey, BaseURL: input.BaseURL})

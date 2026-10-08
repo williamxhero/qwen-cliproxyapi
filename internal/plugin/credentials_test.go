@@ -97,7 +97,7 @@ func TestCredentialRouteHappyPathAndAuthRoundTrip(t *testing.T) {
 		t.Fatal("duplicate overwrote credential")
 	}
 	resp = credentialPost(t, m, `{"base_url":"http://other.test/v1","api_key":"dummy-panel-key"}`)
-	if resp.StatusCode != 200 || !strings.Contains(string(resp.Body), `"label":"Qwen"`) {
+	if resp.StatusCode != 200 || !strings.Contains(string(resp.Body), `"label":"`+maskAPIKey("dummy-panel-key")+`"`) {
 		t.Fatalf("different base URL rejected: %s", resp.Body)
 	}
 	for _, call := range f.callsOf(pluginabi.MethodHostLog) {
@@ -231,7 +231,7 @@ func TestLoginStartManualFormMetadata(t *testing.T) {
 	raw, _ := m.HandleCall(pluginabi.MethodAuthLoginStart, []byte(`{"Provider":"qwen"}`))
 	var result pluginapi.AuthLoginStartResponse
 	decodeResult(t, raw, &result)
-	want := `{"auth_kind":"manual_api_key","submit_path":"/v0/management/plugins/qwen-cliproxyapi/credentials","submit_label":"添加凭证","fields":[{"name":"base_url","label":"Base URL","placeholder":"https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1","required":true},{"name":"api_key","label":"API Key","type":"password","required":true},{"name":"name","label":"凭证名称","required":false}]}`
+	want := `{"auth_kind":"manual_api_key","submit_path":"/v0/management/plugins/qwen-cliproxyapi/credentials","submit_label":"添加凭证","fields":[{"name":"base_url","label":"Base URL","placeholder":"https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1","required":true},{"name":"api_key","label":"API Key","type":"password","required":true},{"name":"name","label":"别名 (Alias)","placeholder":"留空则显示脱敏 API Key","required":false}]}`
 	var wantValue, gotValue any
 	_ = json.Unmarshal([]byte(want), &wantValue)
 	_ = json.Unmarshal(mustJSON(result.Metadata), &gotValue)
