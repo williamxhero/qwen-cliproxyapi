@@ -48,7 +48,7 @@ plugins:
       base-url: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
       api-keys:
         - value: "${QWEN_API_KEY}"
-          name: "Token Plan"
+          name: "Qwen"
       model-prefix: { enabled: true, value: "qwen" }
       catalog: { refresh-interval: "30m", stale-while-unavailable: true }
       protocols: { chat-completions: true, messages: true }
@@ -175,7 +175,7 @@ Tests use dummy keys and mocked HTTP/CLI processes. Live acceptance must use an 
 - Quota requires a separate console login, depends on private console RPC response schemas and browser availability, and is not automatically associated with each API key's account.
 - Browser mode needs an already logged-in connected browser and temporarily navigates a no-focus session. Service/session-0 deployments may require cookie mode.
 - Coding Plan optional enrichment is best-effort; successful public model discovery does not validate keys.
-- Removed keys may leave host-managed credential files; remove/disable those via the host management flow.
+- Removed keys may leave host-managed credential files; remove/disable those via the host management flow. A credential file deleted while the host is running is **not** recreated until the next host restart — the plugin materialises credentials from config at registration, so delete + restart if you need a clean single credential.
 - Initial fallback models may not be available under every plan/region. Client formats supported here are Chat Completions and Messages, not Responses.
 
 ## Attribution
