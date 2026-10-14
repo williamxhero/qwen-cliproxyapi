@@ -68,13 +68,14 @@ type HTTPDoer interface {
 
 type Client struct {
 	Run           CommandRunner
+	RunBL         BLCommandRunner
 	HTTP          HTTPDoer
 	Now           func() time.Time
 	cleanupBudget time.Duration
 }
 
 func NewClient() *Client {
-	return &Client{Run: runBSK, HTTP: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, Now: time.Now}
+	return &Client{Run: runBSK, RunBL: runBL, HTTP: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, Now: time.Now}
 }
 
 func (c *Client) FetchCookie(ctx context.Context, cookie string, check bool) (Result, error) {

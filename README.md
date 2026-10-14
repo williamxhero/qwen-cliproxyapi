@@ -18,7 +18,7 @@ Expose one provider, **`qwen`**, using CLIProxyAPI's credential scheduler, rotat
 - Authenticated catalog discovery, optional `qwen/` prefix, last-good snapshot and built-in initial fallback.
 - Native quota groups, windows, subscription and metrics from an external CLI; no shell invocation, hard timeout, no invented readings.
 - Plugin-registered quota API for the panel: 套餐/status/expiry/remaining days, per-window progress and reset countdowns, CLI observation time, and per-credential/all refresh buttons (`POST /v0/management/plugins/qwen-cliproxyapi/quota-usage`). An embedded HTML view is served at `GET /v0/resource/plugins/qwen-cliproxyapi/quota` for manual use, but it is deliberately **not** advertised as a panel menu.
-- Standalone stdlib-only Go CLI: already-logged-in browser via `bsk`, or explicitly supplied cookie for service/session-0 environments.
+- Standalone stdlib-only Go CLI: official `bl` console credentials, already-logged-in browser via `bsk`, or explicitly supplied cookie for service/session-0 environments.
 
 ## Requirements
 
@@ -120,7 +120,82 @@ Token Plan `/models` is auth-protected. Coding Plan `/models` is a static public
 .\bin\bailian-quota.exe --source cookie --cookie-file C:\private\bailian-cookie.txt
 ```
 
-Flags: `--json` (default normalized JSON), `--pretty`, `--timeout 90s`, `--check` (login/reachability only), `--source bsk|cookie`, `--browser <id>`, `--cookie <header>`, `--cookie-file <path>`, `--cache-file <path>`, `--cache-only`, `--max-age 45m`, `--verbose`.
+Flags: `--json` (default normalized JSON), `--pretty`, `--timeout 90s`, `--check` (login/reachability only), `--source bsk|cookie|bl`, `--bl-path <path>`, `--browser <id>`, `--cookie <header>`, `--cookie-file <path>`, `--cache-file <path>`, `--cache-only`, `--max-age 45m`, `--verbose`. The default source remains `bsk` for compatibility.
+
+### Official bl source (issue #1)
+
+`--source bl` executes exactly `bl usage token-plan --output json`. Executable selection is
+`--bl-path`, then `BAILIAN_BL_PATH`, then `bl` on PATH. Browser/cookie flags cannot be used
+with this source. It uses the **refresh process user's console profile**, not a plan API
+key, and does not require a continuously open browser or bsk daemon.
+
+```powershell
+# Example stable installation path, not the temporary Hermes node tools directory.
+.\bin\bailian-quota.exe --source bl --bl-path C:\ProgramData\cpa-bailian\bl.cmd --pretty
+.\bin\bailian-quota.exe --source bl --bl-path C:\ProgramData\cpa-bailian\bl.cmd --cache-file C:\ProgramData\cpa-qwen-quota\qwen-quota.json
+```
+
+For the official output `{"per1MonthPercentage":1,"per1MonthResetTime":1792252800000}`,
+the CLI emits the following shape (`observedAt` is the current observation, not a fixed value):
+
+```json
+{"source":"bl","observedAt":"...","windows":[{"window":"1month","usedPercent":100,"resetTime":"2026-10-18T00:00:00+08:00"}],"notes":[]}
+```
+
+`plan`, `planStatus`, subscription period/countdown, and `metrics` are **omitted**, both
+live and from cache: bl does not supply them. Milliseconds in the reset timestamp are
+preserved if present. `--check` still runs and validates the CLI response, but emits no
+quota windows. Browser/cookie serialization remains unchanged.
+
+Errors use the existing JSON error channel and nonzero exit, with no readings:
+`bl_unavailable` (missing/unexecutable CLI), `not_logged_in` (official authentication
+code/exit status 3, including expired console credentials), `invalid_response` (bad,
+missing, out-of-range fields or other unsuccessful responses), and `timeout` (deadline,
+cancellation, or official timeout code/exit status 5). Raw stdout/stderr diagnostics are
+never exposed. Windows npm `.cmd`/`.bat` shims run through `cmd.exe` with AutoRun disabled,
+fixed arguments, and no expansion/control characters in the path; native executables
+and Unix launchers execute directly. A timeout terminates the spawned Windows process tree.
+
+#### Refresh identity and console renewal
+
+Install official bl and its required Node runtime in a **stable independent location**,
+not `...\hermes\tools\node-26.7.0-win32-x64`. Verify the launcher and Node runtime under
+the scheduled-task identity; copying just `bl.cmd` is insufficient. Configure an absolute
+`--bl-path` in the refresh command. Never copy tokens into this repository.
+
+For the Windows deployment described in the SPEC, `QwenQuotaRefresh` must run as **will**
+to use `C:\Users\will\.bailian\config.json`. A service identity without those console
+credentials will fail with `not_logged_in`. The task can fetch headlessly after login;
+a permanently open browser is not needed. Protect the profile and quota-cache directory.
+
+When the console token expires, run the **same stable CLI as the refresh user**:
+
+```powershell
+C:\ProgramData\cpa-bailian\bl.cmd auth login --console
+# Complete the one-time browser login, then validate and refresh the cache:
+.\bin\bailian-quota.exe --source bl --bl-path C:\ProgramData\cpa-bailian\bl.cmd --check
+.\bin\bailian-quota.exe --source bl --bl-path C:\ProgramData\cpa-bailian\bl.cmd --cache-file C:\ProgramData\cpa-qwen-quota\qwen-quota.json
+```
+
+API-key login **cannot** substitute for console login. Console renewal requires browser
+interaction; there is no supported headless renewal. Failed refreshes leave the prior
+cache untouched, but `--cache-only` still rejects it once `--max-age` expires.
+
+Keep the host's quota command cache-only; only change the source selector:
+
+```yaml
+quota-source: command
+command: "D:/.../bin/bailian-quota.exe"
+command-args: ["--json", "--source", "bl", "--cache-only", "--cache-file", "C:/ProgramData/cpa-qwen-quota/qwen-quota.json", "--max-age", "45m"]
+```
+
+Cache-only does not execute or resolve bl, so it needs no login or `--bl-path`. The refresh
+task must separately use `--source bl` and the stable CLI path. Changing the host's selector
+alone does not refresh an old bsk cache; the next successful refresh produces `source: bl`.
+For a Linux deployment, use that service user's protected `~/.bailian/config.json`, absolute
+Linux executable/cache paths, and the owning project's deployment procedure; Windows
+paths and the will scheduled-task identity do not apply. See the [deployment record](docs/bl-quota-deployment.md)
+for actual verification status and the remaining environment mismatch.
 
 ### Serving a service-identity host (session 0)
 
@@ -145,7 +220,7 @@ interactive session. Run two halves:
        command-args: ["--json", "--cache-only", "--cache-file", "C:/ProgramData/cpa-qwen-quota/qwen-quota.json", "--max-age", "45m"]
 
 `--cache-only` never touches the network: it prints the cached reading and exits non-zero
-(`cache_unavailable`, `cache_invalid`, `cache_stale`) when no fresh reading exists, so a
+(`cache_file_error`, `invalid_cache`, `stale_cache`) when no fresh reading exists, so a
 stalled refresh surfaces as an explicit error instead of silently stale numbers.
 
 ### Provider keys must not collide
@@ -219,7 +294,7 @@ Tests use dummy keys and mocked HTTP/CLI processes. Live acceptance must use an 
 - CLIProxyAPI core v8.0.15's management `/plugins` response does not expose `auth_provider` or `executor` capability booleans, and its `quota_provider` field is the provider identifier string. The native registration envelope declares the booleans; credential/model/execution/quota endpoints demonstrate behavior. This is a host response-schema limitation, not a reason to invent endpoint fields.
 - No OAuth flow or refresh token: these are manually configured plan keys. Refresh preserves the credential rather than inventing a token.
 - Exhausted quota produces the upstream error, not a successful completion. The acceptance account's monthly quota is 100% used, resetting `2026-10-18T00:00:00+08:00`; a live **429** is expected until reset.
-- Quota requires a separate console login, depends on private console RPC response schemas and browser availability, and is not automatically associated with each API key's account.
+- Quota requires a separate console login and is not automatically associated with each API key's account. `bl` depends on the official CLI's monthly response schema and persisted console credentials; browser mode additionally depends on private console RPC schemas and browser availability.
 - Browser mode needs an already logged-in connected browser and temporarily navigates a no-focus session. Service/session-0 deployments may require cookie mode.
 - Coding Plan optional enrichment is best-effort; successful public model discovery does not validate keys.
 - Removed keys may leave host-managed credential files; remove/disable those via the host management flow. A credential file deleted while the host is running is **not** recreated until the next host restart — the plugin materialises credentials from config at registration, so delete + restart if you need a clean single credential.
