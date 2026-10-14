@@ -246,6 +246,24 @@ func TestBLCacheRoundTripAgeAndFailedRefresh(t *testing.T) {
 	}
 }
 
+func TestBLCachedUnsupportedMetricsCannotBecomeEmptySuccess(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "quota.json")
+	body := `{"source":"bl","observedAt":"` + observed.In(chinaTime).Format(time.RFC3339) + `","windows":[],"metrics":[{"key":"balance","label":"Balance","value":1,"format":"number"}],"notes":[]}`
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	client := blTestClient(t, "", nil)
+	client.RunBL = func(context.Context, string, ...string) ([]byte, []byte, error) {
+		t.Fatal("cache-only ran bl")
+		return nil, nil, nil
+	}
+	var out, diagnostics bytes.Buffer
+	if code := runCLI(context.Background(), []string{"--source", "bl", "--cache-only", "--cache-file", path}, &out, &diagnostics, client); code != 1 {
+		t.Fatal("unsupported cache emitted success without a reading", code, out.String())
+	}
+	assertBLFailure(t, out.Bytes(), "invalid_cache")
+}
+
 // Re-execute only this test as a fake CLI; no official bl or network is used.
 func TestBLHelperProcess(t *testing.T) {
 	mode := os.Getenv("BAILIAN_TEST_BL_HELPER")

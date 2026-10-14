@@ -142,6 +142,11 @@ func readCache(path string, now time.Time, maxAge time.Duration) (Result, error)
 	if json.Unmarshal(body, &result) != nil || result.Source == "" || len(result.Windows)+len(result.Metrics) == 0 {
 		return Result{}, failure("invalid_cache", "quota cache is malformed or contains no reading")
 	}
+	// bl serialization omits unsupported metrics, so they cannot satisfy the
+	// reading requirement on their own. Browser/cookie metrics-only caches remain valid.
+	if result.Source == "bl" && len(result.Windows) == 0 {
+		return Result{}, failure("invalid_cache", "bl quota cache contains no window reading")
+	}
 	observed, err := time.Parse(time.RFC3339, result.ObservedAt)
 	if err != nil || observed.After(now) {
 		return Result{}, failure("invalid_cache", "quota cache has an invalid or future observation time")
