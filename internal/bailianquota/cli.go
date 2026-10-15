@@ -28,7 +28,8 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer, client
 	pretty := flags.Bool("pretty", false, "indent JSON output")
 	timeout := flags.Duration("timeout", 90*time.Second, "overall fetch deadline (cleanup has a separate deadline)")
 	check := flags.Bool("check", false, "verify console login and RPC reachability only")
-	source := flags.String("source", "bsk", "source: bsk or cookie")
+	source := flags.String("source", "bsk", "source: bsk, cookie or bl")
+	blPath := flags.String("bl-path", os.Getenv("BAILIAN_BL_PATH"), "bl executable path (BAILIAN_BL_PATH; default: bl on PATH)")
 	browser := flags.String("browser", "", "connected browser instance ID or unique label")
 	cookie := flags.String("cookie", "", "console cookie header (prefer --cookie-file to avoid argv exposure)")
 	cookieFile := flags.String("cookie-file", "", "path to a file containing the console cookie header")
@@ -37,8 +38,9 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer, client
 	maxAge := flags.Duration("max-age", 45*time.Minute, "maximum cached reading age")
 	verbose := flags.Bool("verbose", false, "write sanitized progress messages to stderr")
 	flags.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: bailian-quota [--json] [--pretty] [--timeout 90s] [--check] [--source bsk|cookie] [--browser ID] [--cookie HEADER | --cookie-file PATH] [--cache-file PATH] [--cache-only] [--max-age 45m] [--verbose]")
+		fmt.Fprintln(stderr, "Usage: bailian-quota [--json] [--pretty] [--timeout 90s] [--check] [--source bsk|cookie|bl] [--bl-path PATH] [--browser ID] [--cookie HEADER | --cookie-file PATH] [--cache-file PATH] [--cache-only] [--max-age 45m] [--verbose]")
 		fmt.Fprintln(stderr, "bsk uses the already-logged-in browser without focus. cookie is the session-0 service fallback; keep its file outside this repository.")
+		fmt.Fprintln(stderr, "bl uses official console credentials; --bl-path overrides BAILIAN_BL_PATH, otherwise resolve bl on PATH. Renew login with bl auth login --console.")
 	}
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -48,10 +50,19 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer, client
 		return writeError(stdout, *pretty, failure("invalid_arguments", "invalid flag or flag value; use --help"))
 	}
 	_ = jsonOutput // JSON remains the contract even when explicitly set to false.
-	if flags.NArg() != 0 || *timeout <= 0 || (*source != "bsk" && *source != "cookie") {
-		return writeError(stdout, *pretty, failure("invalid_arguments", "choose --source bsk|cookie, a positive --timeout, and no positional arguments"))
+	if flags.NArg() != 0 || *timeout <= 0 || (*source != "bsk" && *source != "cookie" && *source != "bl") {
+		return writeError(stdout, *pretty, failure("invalid_arguments", "choose --source bsk|cookie|bl, a positive --timeout, and no positional arguments"))
 	}
-	if (*cookie != "" && *cookieFile != "") || (*source == "bsk" && (*cookie != "" || *cookieFile != "")) || (*source == "cookie" && *browser != "") {
+	blPathSet := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "bl-path" {
+			blPathSet = true
+		}
+	})
+	if blPathSet && *source != "bl" {
+		return writeError(stdout, *pretty, failure("invalid_arguments", "--bl-path requires --source bl"))
+	}
+	if (*cookie != "" && *cookieFile != "") || (*source != "cookie" && (*cookie != "" || *cookieFile != "")) || (*source != "bsk" && *browser != "") {
 		return writeError(stdout, *pretty, failure("invalid_arguments", "cookie flags require --source cookie and are mutually exclusive; --browser requires bsk"))
 	}
 	if *maxAge <= 0 || (*cacheOnly && (*cacheFile == "" || *check || *cookie != "" || *cookieFile != "" || *browser != "")) || (*check && *cacheFile != "") {
@@ -95,7 +106,9 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer, client
 	defer cancel()
 	var result Result
 	var err error
-	if *source == "cookie" {
+	if *source == "bl" {
+		result, err = client.FetchBL(fetchCtx, *blPath, *check)
+	} else if *source == "cookie" {
 		result, err = client.FetchCookie(fetchCtx, *cookie, *check)
 	} else {
 		result, err = client.FetchBrowser(fetchCtx, *browser, *check)
@@ -128,6 +141,11 @@ func readCache(path string, now time.Time, maxAge time.Duration) (Result, error)
 	var result Result
 	if json.Unmarshal(body, &result) != nil || result.Source == "" || len(result.Windows)+len(result.Metrics) == 0 {
 		return Result{}, failure("invalid_cache", "quota cache is malformed or contains no reading")
+	}
+	// bl serialization omits unsupported metrics, so they cannot satisfy the
+	// reading requirement on their own. Browser/cookie metrics-only caches remain valid.
+	if result.Source == "bl" && len(result.Windows) == 0 {
+		return Result{}, failure("invalid_cache", "bl quota cache contains no window reading")
 	}
 	observed, err := time.Parse(time.RFC3339, result.ObservedAt)
 	if err != nil || observed.After(now) {

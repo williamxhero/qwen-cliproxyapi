@@ -2,6 +2,7 @@
 package bailianquota
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -16,6 +17,7 @@ const (
 
 // Result is the frozen stdout contract shared with the provider plugin.
 // Empty readings are arrays, not null; only --check may succeed without a reading.
+// bl omits plan and metrics because the official CLI does not supply them.
 type Result struct {
 	Source     string   `json:"source"`
 	Plan       string   `json:"plan"`
@@ -27,6 +29,21 @@ type Result struct {
 	Windows    []Window `json:"windows"`
 	Metrics    []Metric `json:"metrics"`
 	Notes      []string `json:"notes"`
+}
+
+// MarshalJSON preserves the browser/cookie contract, including empty arrays,
+// while keeping unsupported fields out of live and cached bl readings.
+func (r Result) MarshalJSON() ([]byte, error) {
+	if r.Source == "bl" {
+		return json.Marshal(struct {
+			Source     string   `json:"source"`
+			ObservedAt string   `json:"observedAt"`
+			Windows    []Window `json:"windows"`
+			Notes      []string `json:"notes"`
+		}{r.Source, r.ObservedAt, r.Windows, r.Notes})
+	}
+	type resultJSON Result
+	return json.Marshal(resultJSON(r))
 }
 
 type Window struct {
