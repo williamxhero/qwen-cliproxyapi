@@ -15,7 +15,7 @@ Expose one provider, **`qwen`**, using CLIProxyAPI's credential scheduler, rotat
 - Each configured key becomes a stable `qwen-key-<sha256>.json` auth file with an optional readable label, visible in the management credential page.
 - Execution always uses the **credential selected by the host**, never the catalog's default key.
 - OpenAI Chat Completions and Anthropic Messages requests, tool calls, image parts and streaming SSE translation, adapted from the MIT reference.
-- Authenticated catalog discovery, optional `qwen/` prefix, last-good snapshot and built-in initial fallback.
+- Authenticated full catalog discovery, bare upstream model IDs by default, optional explicit prefix and last-good snapshot.
 - Native quota groups, windows, subscription and metrics from an external CLI; no shell invocation, hard timeout, no invented readings.
 - Plugin-registered quota API for the panel: 套餐/status/expiry/remaining days, per-window progress and reset countdowns, CLI observation time, and per-credential/all refresh buttons (`POST /v0/management/plugins/qwen-cliproxyapi/quota-usage`). An embedded HTML view is served at `GET /v0/resource/plugins/qwen-cliproxyapi/quota` for manual use, but it is deliberately **not** advertised as a panel menu.
 - Standalone stdlib-only Go CLI: official `bl` console credentials, already-logged-in browser via `bsk`, or explicitly supplied cookie for service/session-0 environments.
@@ -52,7 +52,7 @@ plugins:
       api-keys:
         - value: "${QWEN_API_KEY}"
           name: "Qwen"
-      model-prefix: { enabled: true, value: "qwen" }
+      model-prefix: { enabled: false, value: "qwen" }
       catalog: { refresh-interval: "30m", stale-while-unavailable: true }
       protocols: { chat-completions: true, messages: true }
       request-timeout: "5m"
@@ -71,7 +71,7 @@ plugins:
 |---|---|---|
 | `api-keys` | Required | Objects containing `value` and optional `name`; `${ENV_VAR}` expansion; empty/duplicate keys rejected. |
 | `base-url` | Token Plan CN URL above | HTTPS upstream without userinfo, query or fragment. |
-| `model-prefix.enabled` / `.value` | `true` / `qwen` | Publish `qwen/<id>` or bare IDs. |
+| `model-prefix.enabled` / `.value` | `false` / `qwen` | Publish the bare upstream ID by default; when enabled, publish `<value>/<id>`. |
 | `catalog.refresh-interval` | `30m` | Discovery cadence; minimum `1m`. |
 | `catalog.stale-while-unavailable` | `true` | Retain last successful catalog on failure. |
 | `protocols.chat-completions` | `true` | Allow OpenAI Chat Completions clients. |
@@ -105,7 +105,7 @@ The host saves the same top-level `type`, `id`, `label`, and `api_key` schema as
 
 The plugin fetches `GET {base-url}/models` using a configured key. Successful discovery replaces the model list; prefixing changes only public IDs, not upstream IDs. Discovery uses the first configured key, while requests use the host-selected credential.
 
-The documented initial fallback is **`qwen3.8-max`, `qwen3.8-flash`, `qwen3.7-max`**. These are route candidates, not proof of key validity, subscription access or remaining quota. With stale policy enabled an outage retains the last successful catalog. Disable stale policy for fail-closed discovery.
+Before the first successful upstream discovery, the model list is empty rather than a hardcoded partial catalogue. After discovery, every valid upstream model is published, including IDs that do not start with `qwen`. With stale policy enabled an outage retains the last successful catalog. Disable stale policy for fail-closed discovery.
 
 Token Plan `/models` is auth-protected. Coding Plan `/models` is a static public list: **never interpret successful discovery as successful credential validation**.
 
@@ -225,10 +225,9 @@ stalled refresh surfaces as an explicit error instead of silently stale numbers.
 
 ### Provider keys must not collide
 
-A model id routes by its provider prefix. An `openai-compatibility` group literally named
-`Qwen` normalises to the provider key `qwen` — the same key this plugin registers — and the
-host then routes `qwen/<model>` to its own compatibility executor, which fails with
-`missing provider baseURL`. Name that group something else (e.g. `Qwen-Compat`) when this
+A model ID is associated with the credential provider by CPA. An `openai-compatibility`
+group literally named `Qwen` normalises to the provider key `qwen`, which conflicts with
+this plugin. Name that group something else (e.g. `Qwen-Compat`) when this
 plugin is installed.
 
 Browser mode selects the first connected browser unless `--browser` is supplied, starts a session **with `--no-focus`**, navigates the Bailian console, then runs an asynchronous console RPC evaluation. It never extracts, prints or saves browser cookies/tokens. The session is stopped even on failure. Avoid running it concurrently with another browser driver. Requests remain on Alibaba console origins.

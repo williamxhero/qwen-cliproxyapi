@@ -17,8 +17,11 @@ func TestConfigDefaultsAndEnvironmentExpansion(t *testing.T) {
 	if c.APIKeys[0].Value != "dummy-expanded-key" || c.APIKeys[0].Name != "Personal" || c.BaseURL != DefaultBaseURL || c.CatalogURL != DefaultBaseURL+"/models" {
 		t.Fatalf("unexpected config: %#v", c)
 	}
-	if !c.ModelPrefix.Enabled || c.ModelPrefix.Value != "qwen" || c.Catalog.RefreshInterval != 30*time.Minute || !c.Catalog.StaleWhileUnavailable || !c.Protocols.ChatCompletions || !c.Protocols.Messages || c.CommandTimeout != 90*time.Second || c.DisplayName != DefaultDisplayName || strings.Join(c.CommandArgs, ",") != "--json" {
+	if c.ModelPrefix.Enabled || c.ModelPrefix.Value != "qwen" || c.Catalog.RefreshInterval != 30*time.Minute || !c.Catalog.StaleWhileUnavailable || !c.Protocols.ChatCompletions || !c.Protocols.Messages || c.CommandTimeout != 90*time.Second || c.DisplayName != DefaultDisplayName || strings.Join(c.CommandArgs, ",") != "--json" {
 		t.Fatalf("wrong defaults: %#v", c)
+	}
+	if PublicID(c, "deepseek-v4.1-flash") != "deepseek-v4.1-flash" {
+		t.Fatal("default public model ID must match the upstream ID")
 	}
 }
 
@@ -51,7 +54,7 @@ func TestConfigRejectsInvalidAndRedactsErrors(t *testing.T) {
 		"empty": "api-keys: []\ncommand: stub", "blank": "api-keys: [{value: '   '}]\ncommand: stub", "duplicates": "api-keys: [{value: dummy1}, {value: dummy1}]\ncommand: stub", "unset_env": "api-keys: [{value: '${QWEN_UNSET_TEST_KEY}'}]\ncommand: stub", "missing_command": "api-keys: [{value: dummy1}]",
 		"malformed_key": "api-keys: [sk-sensitive-test123]\ncommand: stub", "malformed_yaml": "api-keys: [\ncommand: stub",
 		"http": validYAML + "base-url: http://localhost/v1", "userinfo": validYAML + "base-url: https://user:sk-sensitive-test123@example.com/v1", "query": validYAML + "base-url: https://example.com/v1?key=sk-sensitive-test123", "fragment": validYAML + "base-url: https://example.com/v1#x", "ftp": validYAML + "base-url: ftp://example.com/v1", "invalid_url": validYAML + "base-url: 'https://%'",
-		"refresh": validYAML + "catalog: {refresh-interval: 1s}", "bad_duration": validYAML + "request-timeout: secret", "timeout": validYAML + "request-timeout: 0s", "command_timeout": validYAML + "command-timeout: -1s", "response_limit": validYAML + "max-response-bytes: 0", "prefix": validYAML + "model-prefix: {value: '../bad'}", "quota_source": validYAML + "quota-source: api", "display": validYAML + "display-name: ''",
+		"refresh": validYAML + "catalog: {refresh-interval: 1s}", "bad_duration": validYAML + "request-timeout: secret", "timeout": validYAML + "request-timeout: 0s", "command_timeout": validYAML + "command-timeout: -1s", "response_limit": validYAML + "max-response-bytes: 0", "prefix": validYAML + "model-prefix: {enabled: true, value: '../bad'}", "quota_source": validYAML + "quota-source: api", "display": validYAML + "display-name: ''",
 	}
 	for name, body := range tests {
 		t.Run(name, func(t *testing.T) {

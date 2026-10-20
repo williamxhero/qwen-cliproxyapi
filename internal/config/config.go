@@ -108,7 +108,7 @@ func Load(body []byte) (Config, error) {
 	}
 	c := Config{
 		BaseURL:     strings.TrimRight(orDefault(raw.BaseURL, DefaultBaseURL), "/"),
-		ModelPrefix: ModelPrefix{Enabled: orDefault(raw.ModelPrefix.Enabled, true), Value: orDefault(raw.ModelPrefix.Value, DefaultModelPrefix)},
+		ModelPrefix: ModelPrefix{Enabled: orDefault(raw.ModelPrefix.Enabled, false), Value: orDefault(raw.ModelPrefix.Value, DefaultModelPrefix)},
 		Catalog:     Catalog{RefreshInterval: refresh, StaleWhileUnavailable: orDefault(raw.Catalog.StaleWhileUnavailable, true)},
 		Protocols:   Protocols{ChatCompletions: orDefault(raw.Protocols.ChatCompletions, true), Messages: orDefault(raw.Protocols.Messages, true)},
 		AllowHTTP:   raw.AllowHTTP, RequestTimeout: timeout, MaxResponseBytes: orDefault(raw.MaxResponseBytes, DefaultMaxResponseBytes),

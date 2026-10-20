@@ -32,15 +32,32 @@ func providerConfig(t *testing.T) config.Config {
 func lifecycleBody(body string) []byte { return mustJSON(lifecycleRequest{ConfigYAML: []byte(body)}) }
 func newExecutorManager(t *testing.T, responder RawCaller) (*Manager, *fakeCaller) {
 	t.Helper()
-	f := &fakeCaller{responder: responder}
+	f := &fakeCaller{responder: func(method string, payload []byte) ([]byte, error) {
+		if method == pluginabi.MethodHostHTTPDo {
+			var req hostHTTPReq
+			if json.Unmarshal(payload, &req) == nil && req.Method == http.MethodGet {
+				return hostOK(pluginapi.HTTPResponse{StatusCode: http.StatusOK, Body: []byte(`{"data":[{"id":"qwen3.8-max"}]}`)}), nil
+			}
+		}
+		if responder != nil {
+			return responder(method, payload)
+		}
+		return hostOK(map[string]any{}), nil
+	}}
 	m := NewManager(NewHostBridge(f.call))
 	m.cfg = providerConfig(t)
-	m.mgr = catalog.New(m.cfg, nil)
+	m.mgr = catalog.New(m.cfg, m.bridge)
+	if err := m.mgr.Refresh(context.Background(), "dummy-selected-key"); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.calls = nil
+	f.mu.Unlock()
 	t.Cleanup(func() { _, _ = m.HandleCall(pluginabi.MethodPluginShutdown, nil) })
 	return m, f
 }
 func executionBody(format, body string, stream bool) []byte {
-	return mustJSON(executorRequest{ExecutorRequest: pluginapi.ExecutorRequest{AuthID: "selected", AuthProvider: ProviderID, AuthAttributes: map[string]string{"api_key": "dummy-selected-key"}, Model: "qwen/qwen3.8-max", SourceFormat: format, OriginalRequest: []byte(body), Stream: stream}, StreamID: "downstream"})
+	return mustJSON(executorRequest{ExecutorRequest: pluginapi.ExecutorRequest{AuthID: "selected", AuthProvider: ProviderID, AuthAttributes: map[string]string{"api_key": "dummy-selected-key"}, Model: "qwen3.8-max", SourceFormat: format, OriginalRequest: []byte(body), Stream: stream}, StreamID: "downstream"})
 }
 
 func TestProviderRegistrationAndCredentialMaterialization(t *testing.T) {
@@ -82,7 +99,7 @@ func TestProviderRegistrationAndCredentialMaterialization(t *testing.T) {
 	raw, _ = m.HandleCall(pluginabi.MethodModelForAuth, []byte(`{}`))
 	var models pluginapi.ModelResponse
 	decodeResult(t, raw, &models)
-	if models.Provider != "qwen" || len(models.Models) != 1 {
+	if models.Provider != "qwen" || len(models.Models) != 1 || models.Models[0].ID != "qwen3.8-max" {
 		t.Fatalf("models: %#v", models)
 	}
 }
@@ -137,15 +154,15 @@ func TestLifecycleFallbackReconfigureAndInvalidConfig(t *testing.T) {
 	m := NewManager(nil)
 	defer m.HandleCall(pluginabi.MethodPluginShutdown, nil)
 	raw, _ := m.HandleCall(pluginabi.MethodPluginRegister, lifecycleBody(providerYAML))
-	if !decodeEnv(t, raw).OK || len(m.mgr.Models()) != 3 {
-		t.Fatal("startup fallback missing")
+	if !decodeEnv(t, raw).OK || len(m.mgr.Models()) != 0 {
+		t.Fatal("failed initial discovery must not publish an incomplete catalog")
 	}
 	raw, _ = m.HandleCall(pluginabi.MethodPluginReconfigure, lifecycleBody(providerYAML+"model-prefix: {value: custom}\n"))
 	if !decodeEnv(t, raw).OK {
 		t.Fatal(string(raw))
 	}
-	if _, ok := m.mgr.Lookup("custom/qwen3.8-max"); !ok {
-		t.Fatal("stale prefix not rebuilt")
+	if len(m.mgr.Models()) != 0 {
+		t.Fatal("failed discovery must remain empty after reconfigure")
 	}
 	raw, _ = m.HandleCall(pluginabi.MethodPluginReconfigure, lifecycleBody(providerYAML+"catalog: {stale-while-unavailable: false}\n"))
 	if !decodeEnv(t, raw).OK || len(m.mgr.Models()) != 0 {
@@ -244,7 +261,7 @@ func TestExecutorProtocolSwitchesDoNotAffectCatalog(t *testing.T) {
 	if decodeEnv(t, raw).OK {
 		t.Fatal("disabled messages accepted")
 	}
-	if len(m.mgr.Models()) != 3 {
+	if len(m.mgr.Models()) != 1 {
 		t.Fatal("client protocol switch removed models")
 	}
 	m.cfg.Protocols.ChatCompletions = false

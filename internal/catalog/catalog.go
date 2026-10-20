@@ -3,7 +3,8 @@
 // (FR-002, FR-003, FR-004, FR-010).
 //
 // Every discovered model uses the OpenAI chat-completions upstream.
-// The initial fallback is replaced, not merged, on successful discovery.
+// The catalog remains empty until successful discovery; incomplete hardcoded
+// model lists must not be presented as the credential's available models.
 //
 // No scheduling lives here; M3 wires the refresh cadence.
 package catalog
@@ -106,9 +107,6 @@ type rawThinking struct {
 	Levels         []string `json:"levels"`
 }
 
-// BuiltinFallbackIDs is a startup fallback, not proof of key validity.
-var BuiltinFallbackIDs = []string{"qwen3.8-max", "qwen3.8-flash", "qwen3.7-max"}
-
 // Manager owns the catalog snapshot. All accessors are safe for
 // concurrent use alongside Refresh.
 type Manager struct {
@@ -131,13 +129,7 @@ type Manager struct {
 
 // New returns a Manager serving cfg through the host client.
 func New(cfg config.Config, client HostClient) *Manager {
-	m := &Manager{cfg: cfg, client: client}
-	entries := make([]rawModel, 0, len(BuiltinFallbackIDs))
-	for _, id := range BuiltinFallbackIDs {
-		entries = append(entries, rawModel{ID: id})
-	}
-	m.swap(entries)
-	return m
+	return &Manager{cfg: cfg, client: client}
 }
 
 // SeedFrom republishes prev's last-good snapshot into m by REBUILDING every
