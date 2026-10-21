@@ -157,6 +157,71 @@ func TestBLStructuredErrorsAndCancellation(t *testing.T) {
 	}
 }
 
+// fakeExitError models a Windows status code without a real *exec.ExitError.
+type fakeExitError struct{ code int }
+
+func (f fakeExitError) Error() string { return "exit status" }
+func (f fakeExitError) ExitCode() int { return f.code }
+
+// blTeardownAssertion is the libuv message the official Node launcher prints
+// after its payload when it aborts on Windows.
+const blTeardownAssertion = `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 94`
+
+func TestBLTeardownAbortWithStderrAuthFailure(t *testing.T) {
+	client := testClient()
+	client.RunBL = func(context.Context, string, ...string) ([]byte, []byte, error) {
+		stderr := `{"error":{"code":3,"message":"Console session is not logged in or has expired."}}` + "\n" + blTeardownAssertion
+		return nil, []byte(stderr), fakeExitError{code: 3221226505}
+	}
+	var out, diagnostics bytes.Buffer
+	if code := runCLI(context.Background(), []string{"--source", "bl"}, &out, &diagnostics, client); code != 1 {
+		t.Fatal(code, out.String())
+	}
+	assertBLFailure(t, out.Bytes(), "not_logged_in")
+}
+
+func TestBLTeardownAbortKeepsCompleteReading(t *testing.T) {
+	client := testClient()
+	client.RunBL = func(context.Context, string, ...string) ([]byte, []byte, error) {
+		return []byte(blUsage), []byte(blTeardownAssertion), fakeExitError{code: 3221226505}
+	}
+	var out, diagnostics bytes.Buffer
+	if code := runCLI(context.Background(), []string{"--source", "bl"}, &out, &diagnostics, client); code != 0 {
+		t.Fatal(code, out.String())
+	}
+	assertBLOmitted(t, out.Bytes())
+	var result Result
+	if json.Unmarshal(out.Bytes(), &result) != nil || len(result.Windows) != 1 || result.Windows[0].UsedPercent != 100 {
+		t.Fatal(out.String())
+	}
+}
+
+func TestBLUnrelatedAbortStatusStillFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stdout string
+		stderr string
+		code   int
+		want   string
+	}{
+		{"reading_with_crash_status", blUsage, "stack trace noise", 1, "invalid_response"},
+		{"reading_with_other_abort", blUsage, blTeardownAssertion, 3221225477, "invalid_response"},
+		{"auth_with_trailing_garbage", `{"error":{"code":3}}` + "\nunexpected text", "", 0, "invalid_response"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := testClient()
+			client.RunBL = func(context.Context, string, ...string) ([]byte, []byte, error) {
+				return []byte(tc.stdout), []byte(tc.stderr), fakeExitError{code: tc.code}
+			}
+			var out, diagnostics bytes.Buffer
+			if code := runCLI(context.Background(), []string{"--source", "bl"}, &out, &diagnostics, client); code != 1 {
+				t.Fatal(code, out.String())
+			}
+			assertBLFailure(t, out.Bytes(), tc.want)
+		})
+	}
+}
+
 func TestBLPathPrecedenceAndFlags(t *testing.T) {
 	for _, tc := range []struct {
 		env, flag, want string

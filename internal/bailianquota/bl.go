@@ -1,11 +1,13 @@
 package bailianquota
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"math"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -51,30 +53,35 @@ func (c *Client) FetchBL(ctx context.Context, executable string, check bool) (Re
 	if len(stdout) > maxResponseBytes || len(stderr) > maxResponseBytes {
 		return Result{}, failure("invalid_response", "bl output exceeds the response limit")
 	}
-	// bl v2 uses code/exit status 3 for missing or expired console login,
-	// and 5 for timeout. Errors can be printed to either stream.
-	var exitErr *exec.ExitError
+	// bl v2 writes its error envelope to either stream, and on Windows the Node
+	// launcher can abort during teardown after the payload has already been
+	// written. The exit status alone is therefore not a reliable diagnostic.
+	var coded exitCoder
 	exitCode := 0
-	if errors.As(runErr, &exitErr) {
-		exitCode = exitErr.ExitCode()
+	if errors.As(runErr, &coded) {
+		exitCode = coded.ExitCode()
 	}
 	stdoutCode, stdoutError := blError(stdout)
 	stderrCode, stderrError := blError(stderr)
-	if exitCode == 3 || stdoutCode == 3 || stderrCode == 3 {
+	code := stdoutCode
+	if code == 0 {
+		code = stderrCode
+	}
+	if code == 3 || exitCode == 3 {
 		return Result{}, failure("not_logged_in", "bl console login is missing or expired; run bl auth login --console as the refresh user")
 	}
-	if exitCode == 5 || stdoutCode == 5 || stderrCode == 5 {
+	if code == 5 || exitCode == 5 {
 		return Result{}, failure("timeout", "bl operation exceeded its deadline")
 	}
-	if runErr != nil || stdoutError || stderrError {
+	if stdoutError || stderrError {
 		return Result{}, failure("invalid_response", "bl returned an unsuccessful quota response")
 	}
-	var usage struct {
-		Percentage *float64 `json:"per1MonthPercentage"`
-		ResetTime  *int64   `json:"per1MonthResetTime"`
-	}
-	if json.Unmarshal(stdout, &usage) != nil || usage.Percentage == nil || usage.ResetTime == nil || math.IsNaN(*usage.Percentage) || math.IsInf(*usage.Percentage, 0) || *usage.Percentage < 0 || *usage.Percentage > 1 || *usage.ResetTime < 0 || *usage.ResetTime > 253402271999999 {
+	usage, valid := parseBLUsage(stdout)
+	if !valid {
 		return Result{}, failure("invalid_response", "bl returned invalid or missing monthly quota fields")
+	}
+	if runErr != nil && !isWindowsTeardownAbort(exitCode) {
+		return Result{}, failure("invalid_response", "bl returned an unsuccessful quota response")
 	}
 	result := emptyResult("bl", c.Now())
 	if !check {
@@ -83,9 +90,75 @@ func (c *Client) FetchBL(ctx context.Context, executable string, check bool) (Re
 	return result, nil
 }
 
+// exitCoder keeps the exit-status mapping testable without constructing a real
+// *exec.ExitError for a Windows status code.
+type exitCoder interface {
+	ExitCode() int
+}
+
+// The official Node launcher can abort while tearing down after it has already
+// written its payload (libuv UV_HANDLE_CLOSING assertion, status 0xC0000409).
+// Both the signed and unsigned spellings are accepted because Go reports the
+// raw Windows status as an int.
+func isWindowsTeardownAbort(code int) bool {
+	return code == 3221226505 || code == -1073740791
+}
+
+type blUsageFields struct {
+	Percentage *float64 `json:"per1MonthPercentage"`
+	ResetTime  *int64   `json:"per1MonthResetTime"`
+}
+
+func parseBLUsage(stdout []byte) (blUsageFields, bool) {
+	value := firstJSONValue(stdout)
+	if value == nil {
+		return blUsageFields{}, false
+	}
+	var usage blUsageFields
+	if json.Unmarshal(value, &usage) != nil || usage.Percentage == nil || usage.ResetTime == nil {
+		return blUsageFields{}, false
+	}
+	if math.IsNaN(*usage.Percentage) || math.IsInf(*usage.Percentage, 0) || *usage.Percentage < 0 || *usage.Percentage > 1 || *usage.ResetTime < 0 || *usage.ResetTime > 253402271999999 {
+		return blUsageFields{}, false
+	}
+	return usage, true
+}
+
+// firstJSONValue returns the first complete JSON value when whatever follows it
+// is only the known Windows teardown assertion. Any other trailing content is
+// rejected, so concatenated payloads cannot be read as a valid reading.
+func firstJSONValue(stream []byte) []byte {
+	decoder := json.NewDecoder(bytes.NewReader(stream))
+	var raw json.RawMessage
+	if decoder.Decode(&raw) != nil {
+		return nil
+	}
+	if !tolerableTrailer(stream[int(decoder.InputOffset()):]) {
+		return nil
+	}
+	return raw
+}
+
+func tolerableTrailer(rest []byte) bool {
+	for _, line := range strings.Split(string(rest), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "Assertion failed:") && !strings.Contains(line, "UV_HANDLE_CLOSING") {
+			return false
+		}
+	}
+	return true
+}
+
 func blError(body []byte) (int, bool) {
+	value := firstJSONValue(body)
+	if value == nil {
+		return 0, false
+	}
 	var envelope map[string]json.RawMessage
-	if json.Unmarshal(body, &envelope) != nil {
+	if json.Unmarshal(value, &envelope) != nil {
 		return 0, false
 	}
 	raw, present := envelope["error"]

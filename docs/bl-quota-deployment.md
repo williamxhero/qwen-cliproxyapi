@@ -39,7 +39,9 @@ When the CLI reports `not_logged_in`:
 4. Verify the scheduled task uses that user and absolute path. Preserve the plugin's `--cache-only --cache-file ... --max-age 45m` arguments, changing only its source selector to `--source bl`.
 5. Confirm the cache reports a new `observedAt`, `source: bl`, and exactly the CLI-reported monthly value/reset. Confirm the authorized panel renders these two fields and treats other fields as missing.
 
-A permanently open browser is not needed after login, but **console renewal itself has no supported headless substitute**. Never put profile tokens in config, logs, PRs, or this repository. Cache-only has no console authentication requirement. A stopped/failed refresh eventually surfaces `stale_cache`, not a fabricated current reading.
+A permanently open browser is not needed after login, but **console renewal itself has no supported headless substitute**. Never put profile tokens in config, logs, PRs, or this repository. Cache-only has no console authentication requirement. A stopped/failed refresh eventually surfaces as `stale_cache`, not a fabricated current reading.
+
+For the Windows interactive task, the login-notification wrapper opens the official console once per continuous expired-login episode and clears its suppression marker after a successful cache refresh. It does not run from the LocalCPA service process and never fills credentials. The 10-minute task cadence retries normally after the user signs in.
 
 For **Linux/yosef-server**, first establish the actual quota-refresh identity and that identity's protected `~/.bailian/config.json`; do not reuse Windows paths or presume a `will` user. The same `bl auth login --console` renewal principle applies, using the stable Linux executable under that identity.
 

@@ -156,6 +156,13 @@ never exposed. Windows npm `.cmd`/`.bat` shims run through `cmd.exe` with AutoRu
 fixed arguments, and no expansion/control characters in the path; native executables
 and Unix launchers execute directly. A timeout terminates the spawned Windows process tree.
 
+The official CLI may write its JSON envelope to either stream, and on Windows the Node
+launcher can abort during teardown (`UV_HANDLE_CLOSING` assertion, status `0xC0000409`)
+after the payload has already been written. The first complete JSON value is therefore
+parsed on both streams and that specific abort is tolerated, so a genuine
+`not_logged_in` is not downgraded to `invalid_response`. Any other trailing content,
+exit status or error code still fails closed.
+
 #### Refresh identity and console renewal
 
 Install official bl and its required Node runtime in a **stable independent location**,
@@ -180,6 +187,14 @@ C:\ProgramData\cpa-bailian\bl.cmd auth login --console
 API-key login **cannot** substitute for console login. Console renewal requires browser
 interaction; there is no supported headless renewal. Failed refreshes leave the prior
 cache untouched, but `--cache-only` still rejects it once `--max-age` expires.
+
+For the Windows `QwenQuotaRefresh` interactive task, deploy
+`ops/refresh-qwen-quota.ps1` to `C:\ProgramData\cpa-qwen-quota` and have the existing
+task wrapper invoke it. It opens the console and shows a one-time notice only for
+`not_logged_in`; unrelated refresh failures do not interrupt the desktop. A successful
+cache refresh clears the notification suppression so a later expired session can notify
+again. Run `powershell.exe -NoProfile -File ops/refresh-qwen-quota.ps1 -SelfTest`
+before deployment to verify classification and suppression behavior.
 
 Keep the host's quota command cache-only; only change the source selector:
 
