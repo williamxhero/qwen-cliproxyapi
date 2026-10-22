@@ -92,6 +92,12 @@ func TestProviderRegistrationAndCredentialMaterialization(t *testing.T) {
 	if saved.Name != id+".json" || record["id"] != id || record["label"] != maskAPIKey("dummy-config-key") || record["type"] != "qwen" {
 		t.Fatalf("bad credential: %s %s", saved.Name, saved.JSON)
 	}
+	// A management client reads the file, saves the whole form and re-reads it.
+	// A missing base_url would be added by that save and read as an unexpected
+	// change, so materialised records must carry it.
+	if record["base_url"] != m.cfg.BaseURL {
+		t.Fatalf("materialised credential missing base_url: %s", saved.JSON)
+	}
 	raw, _ = m.HandleCall(pluginabi.MethodPluginReconfigure, lifecycleBody(yaml))
 	if !decodeEnv(t, raw).OK || len(f.callsOf(pluginabi.MethodHostAuthSave)) != 1 {
 		t.Fatal("reconfigure overwrote existing credential")

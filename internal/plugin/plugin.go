@@ -362,14 +362,19 @@ func (m *Manager) materializeAuthRecords(ctx context.Context, cfg config.Config)
 		if _, ok := existing[name]; ok {
 			continue
 		}
-		// Filenames remain stable across labels and config ordering.
+		// Filenames remain stable across labels and config ordering. base_url is
+		// persisted so the record is self-describing: a management client that
+		// reads the file, saves the form and re-reads it must see the same value.
+		credentialKey := key.Value
 		record, err := json.Marshal(struct {
-			Type   string `json:"type"`
-			ID     string `json:"id"`
-			Label  string `json:"label"`
-			APIKey string `json:"api_key"`
+			Type    string `json:"type"`
+			ID      string `json:"id"`
+			Label   string `json:"label"`
+			APIKey  string `json:"api_key"`
+			BaseURL string `json:"base_url,omitempty"`
 		}{
-			Type: "qwen", ID: id, Label: accountLabel(cfg, key.Value, "", i), APIKey: key.Value,
+			Type: "qwen", ID: id, Label: accountLabel(cfg, credentialKey, "", i), APIKey: credentialKey,
+			BaseURL: cfg.BaseURL,
 		})
 		if err != nil {
 			return fmt.Errorf("build auth record")
